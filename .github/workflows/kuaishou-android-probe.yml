@@ -1,12 +1,6 @@
 name: Kuaishou Android Probe
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/kuaishou-android-probe.yml"
-      - ".github/scripts/**"
   workflow_dispatch:
     inputs:
       video_url:
@@ -14,31 +8,30 @@ on:
         required: true
         default: https://v.kuaishou.com/7EsP76S3
       apk_url:
-        description: Optional direct Kuaishou APK URL; leave blank to resolve current APK from Baidu Mobile
+        description: Optional APK URL; defaults to the tested Baidu package
         required: false
-        default: ""
-      probe_seconds:
-        description: Seconds to observe the app after opening the video
-        required: true
-        default: "75"
+        default: https://gdown.baidu.com/appcenter/pkg/upload/b63d72769f6760d6928d0afe7142e4da?prodid=2&suffix=eyJiZF92aWQiOiJuSGNZcmo2M1BXMGRQSDZMblcwTFBqbmtuVzd4bkhtMW5kdFlnMURzbjd0WWcxRFluV1J2ckg2MVBqRHNuNiJ9&docid=5015887276
+  push:
+    paths:
+      - .github/workflows/kuaishou-android-probe.yml
+      - tools/kuaishou-android-probe.sh
+      - tools/kuaishou-url-hook.js
 
 permissions:
   contents: read
 
 jobs:
   probe:
-    name: Probe Kuaishou app network
+    name: Probe Kuaishou app traffic
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      VIDEO_URL: ${{ github.event.inputs.video_url || 'https://v.kuaishou.com/7EsP76S3' }}
+      APK_URL: ${{ github.event.inputs.apk_url || 'https://gdown.baidu.com/appcenter/pkg/upload/b63d72769f6760d6928d0afe7142e4da?prodid=2&suffix=eyJiZF92aWQiOiJuSGNZcmo2M1BXMGRQSDZMblcwTFBqbmtuVzd4bkhtMW5kdFlnMURzbjd0WWcxRFluV1J2ckg2MVBqRHNuNiJ9&docid=5015887276' }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
+        uses: actions/checkout@v4
 
       - name: Enable KVM
         run: |
@@ -47,42 +40,50 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           ls -l /dev/kvm
 
-      - name: Download Kuaishou APK
-        env:
-          APK_URL: ${{ inputs.apk_url }}
-          APK_OUT: kuaishou.apk
-        run: |
-          python3 -m pip install --quiet requests
-          python3 .github/scripts/download_kuaishou_apk.py
-          ls -lh kuaishou.apk
-          shasum -a 256 kuaishou.apk
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Run x86_64 Android probe with ARM translation
+      - name: Download Kuaishou APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 --retry-delay 2 \
+            -A 'Mozilla/5.0 (Linux; Android 15; Pixel 9 Pro) AppleWebKit/537.36 Chrome/153 Mobile Safari/537.36' \
+            -e 'https://mobile.baidu.com/' \
+            "$APK_URL" -o kuaishou.apk
+          test "$(stat -c %s kuaishou.apk)" -gt 100000000
+          unzip -tq kuaishou.apk >/dev/null
+          sha256sum kuaishou.apk
+          file kuaishou.apk
+
+      - name: Run Android probe
         uses: reactivecircus/android-emulator-runner@v2
-        env:
-          PACKAGE_NAME: com.smile.gifmaker
-          VIDEO_URL: ${{ inputs.video_url }}
-          PROBE_SECONDS: ${{ inputs.probe_seconds }}
         with:
-          api-level: 34
+          api-level: 35
           target: google_apis
           arch: x86_64
-          profile: pixel_7_pro
+          profile: pixel_5
           cores: 2
           ram-size: 4096M
           heap-size: 512M
-          disk-size: 6G
-          emulator-boot-timeout: 600
+          force-avd-creation: true
+          emulator-boot-timeout: 900
+          emulator-options: >-
+            -no-window
+            -gpu swiftshader_indirect
+            -no-snapshot
+            -noaudio
+            -no-boot-anim
+            -camera-back none
+            -camera-front none
           disable-animations: true
-          disable-spellchecker: true
-          emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: bash .github/scripts/kuaishou_android_probe.sh
+          script: bash tools/kuaishou-android-probe.sh "$VIDEO_URL" "$GITHUB_WORKSPACE/kuaishou.apk"
 
       - name: Upload probe artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kuaishou-android-probe-${{ github.run_id }}
-          path: artifacts/
+          path: artifacts/kuaishou-android-probe/
           if-no-files-found: warn
           retention-days: 7
