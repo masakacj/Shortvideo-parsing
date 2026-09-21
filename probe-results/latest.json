@@ -1,0 +1,42 @@
+{
+  "source_url": "https://v.kuaishou.com/7EsP76S3",
+  "run_id": "35585811293",
+  "commit": "d1939493503fe3b8bd1d47e2cb90627e0a4ae00e",
+  "candidate_count": 1,
+  "best": {
+    "url": "https://m.kuaishou.com/",
+    "url_sha256": "bc996c368dabb36e74e6fe61b2afa150fd509c1b9ae0573ca3440a7c654f74aa",
+    "host": "m.kuaishou.com",
+    "http_status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "size": 18750,
+    "width": null,
+    "height": null,
+    "short_edge": null,
+    "fps": null,
+    "codec": null,
+    "video_bitrate": null,
+    "format_bitrate": null,
+    "duration": null,
+    "error": "[tls @ 0x56076a3b7540] Error in the pull function.\n[tls @ 0x56076a3b7540] IO error: Connection reset by peer\nhttps://m.kuaishou.com/: Connection reset by peer"
+  },
+  "candidates": [
+    {
+      "url": "https://m.kuaishou.com/",
+      "url_sha256": "bc996c368dabb36e74e6fe61b2afa150fd509c1b9ae0573ca3440a7c654f74aa",
+      "host": "m.kuaishou.com",
+      "http_status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "size": 18750,
+      "width": null,
+      "height": null,
+      "short_edge": null,
+      "fps": null,
+      "codec": null,
+      "video_bitrate": null,
+      "format_bitrate": null,
+      "duration": null,
+      "error": "[tls @ 0x56076a3b7540] Error in the pull function.\n[tls @ 0x56076a3b7540] IO error: Connection reset by peer\nhttps://m.kuaishou.com/: Connection reset by peer"
+    }
+  ]
+}
