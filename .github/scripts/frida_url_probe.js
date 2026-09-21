@@ -93,4 +93,58 @@ Java.perform(function () {
       return u.call(this, uri);
     };
   });
+
+  safeUse("org.chromium.net.CronetEngine", function (C) {
+    const method = C.newUrlRequestBuilder;
+    if (!method) return;
+    method.overloads.forEach(function (o) {
+      if (o.argumentTypes.length > 0 && o.argumentTypes[0].className === "java.lang.String") {
+        o.implementation = function () {
+          report("CronetEngine.newUrlRequestBuilder", arguments[0]);
+          return o.apply(this, arguments);
+        };
+      }
+    });
+  });
+
+  safeUse("org.chromium.net.ExperimentalCronetEngine", function (C) {
+    const method = C.newUrlRequestBuilder;
+    if (!method) return;
+    method.overloads.forEach(function (o) {
+      if (o.argumentTypes.length > 0 && o.argumentTypes[0].className === "java.lang.String") {
+        o.implementation = function () {
+          report("ExperimentalCronetEngine.newUrlRequestBuilder", arguments[0]);
+          return o.apply(this, arguments);
+        };
+      }
+    });
+  });
+
+  safeUse("com.google.android.exoplayer2.upstream.DefaultHttpDataSource", function (C) {
+    const open = C.open.overload("com.google.android.exoplayer2.upstream.DataSpec");
+    open.implementation = function (spec) {
+      try { report("ExoPlayer.DefaultHttpDataSource.open", spec.uri.value.toString()); } catch (_) {}
+      return open.call(this, spec);
+    };
+  });
+
+  safeUse("androidx.media3.datasource.DefaultHttpDataSource", function (C) {
+    const open = C.open.overload("androidx.media3.datasource.DataSpec");
+    open.implementation = function (spec) {
+      try { report("Media3.DefaultHttpDataSource.open", spec.uri.value.toString()); } catch (_) {}
+      return open.call(this, spec);
+    };
+  });
+
+  try {
+    const classes = Java.enumerateLoadedClassesSync()
+      .filter(function (name) {
+        return /(kwai|kuaishou|gifshow|cronet|exoplayer|media3)/i.test(name) &&
+               /(player|video|media|network|http|cdn|stream|data)/i.test(name);
+      })
+      .slice(0, 800);
+    send({ type: "class_inventory", classes: classes, ts: Date.now() });
+  } catch (e) {
+    send({ type: "class_inventory", error: String(e), ts: Date.now() });
+  }
 });

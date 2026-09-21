@@ -170,3 +170,10 @@ PY
 
 echo "=== Candidate URLs ==="
 cat artifacts/candidate-urls.txt || true
+
+echo "=== Probe media candidates ==="
+if ! command -v ffprobe >/dev/null 2>&1; then
+  sudo apt-get update -qq
+  sudo apt-get install -y -qq ffmpeg
+fi
+PROBE_OUT=artifacts VIDEO_URL="$VIDEO_URL" python3 .github/scripts/analyze_probe_urls.py
