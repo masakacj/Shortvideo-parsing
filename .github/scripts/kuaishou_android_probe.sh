@@ -167,6 +167,53 @@ for _ in range(20):
         time.sleep(2)
 PY
 
+# Resource repair can restart the app after the first loop. Launch again and
+# explicitly clear the privacy dialog by its stable positive-button resource ID.
+echo "=== Relaunch after resource repair ==="
+adb shell monkey -p "$PACKAGE_NAME" -c android.intent.category.LAUNCHER 1 || true
+sleep 8
+python3 - <<'PY'
+import re, subprocess, time, xml.etree.ElementTree as ET
+
+for _ in range(20):
+    subprocess.run(["adb","shell","uiautomator","dump","/sdcard/window.xml"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    p=subprocess.run(["adb","shell","cat","/sdcard/window.xml"], text=True, capture_output=True)
+    try:
+        root=ET.fromstring(p.stdout)
+    except Exception:
+        time.sleep(2)
+        continue
+
+    nodes=list(root.iter("node"))
+    labels=[((n.attrib.get("text") or "") + " " + (n.attrib.get("content-desc") or "")).strip() for n in nodes]
+    privacy=any("欢迎使用快手" in x or "Welcome to Kwai" in x for x in labels)
+
+    hit=None
+    if privacy:
+        for n in nodes:
+            rid=n.attrib.get("resource-id") or ""
+            text=(n.attrib.get("text") or "").strip()
+            if rid == "com.smile.gifmaker:id/positive" or text in {"同意并继续","Agree and continue","Agree and Continue"}:
+                hit=n
+                break
+
+    if hit is not None:
+        m=re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", hit.attrib.get("bounds",""))
+        if m:
+            x=(int(m.group(1))+int(m.group(3)))//2
+            y=(int(m.group(2))+int(m.group(4)))//2
+            subprocess.run(["adb","shell","input","tap",str(x),str(y)])
+            print("Tapped privacy positive",x,y)
+            time.sleep(6)
+            continue
+
+    if not privacy:
+        print("Privacy dialog cleared")
+        break
+
+    time.sleep(2)
+PY
+
 adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
 adb pull /sdcard/window.xml artifacts/window-after-consent.xml >/dev/null 2>&1 || true
 adb exec-out screencap -p > artifacts/screen-after-consent.png || true
