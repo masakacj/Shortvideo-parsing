@@ -132,9 +132,9 @@ adb exec-out screencap -p > artifacts/screen-before.png || true
 python3 - <<'PY'
 import re, subprocess, time, xml.etree.ElementTree as ET
 positive = [
-    "优化","立即优化","去优化",
+    "优化","立即优化","去优化","确定","确认","好的",
     "同意并继续","同意并使用","同意","允许","继续","我知道了","知道了","跳过","以后再说",
-    "Agree and continue","Agree and Continue","Agree","Allow","Continue","Got it","Skip","Not now",
+    "Agree and continue","Agree and Continue","Agree","Allow","Continue","Got it","OK","Confirm","Skip","Not now",
 ]
 idle_rounds = 0
 for _ in range(20):
@@ -155,7 +155,7 @@ for _ in range(20):
                     y=(int(m.group(2))+int(m.group(4)))//2
                     subprocess.run(["adb","shell","input","tap",str(x),str(y)])
                     print("Tapped",wanted,x,y)
-                    time.sleep(12 if "优化" in wanted else 3)
+                    time.sleep(12 if "优化" in wanted else 5 if wanted in {"确定","确认","OK","Confirm"} else 3)
                     idle_rounds = 0
                     hit=True
                     break
