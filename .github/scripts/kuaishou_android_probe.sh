@@ -131,7 +131,10 @@ adb exec-out screencap -p > artifacts/screen-before.png || true
 # Best-effort click common positive/continue buttons from the current UI.
 python3 - <<'PY'
 import re, subprocess, time, xml.etree.ElementTree as ET
-positive = ["同意并继续","同意并使用","同意","允许","继续","我知道了","知道了","跳过","以后再说"]
+positive = [
+    "同意并继续","同意并使用","同意","允许","继续","我知道了","知道了","跳过","以后再说",
+    "Agree and continue","Agree and Continue","Agree","Allow","Continue","Got it","Skip","Not now",
+]
 for _ in range(8):
     subprocess.run(["adb","shell","uiautomator","dump","/sdcard/window.xml"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     p=subprocess.run(["adb","shell","cat","/sdcard/window.xml"], text=True, capture_output=True)
@@ -156,6 +159,10 @@ for _ in range(8):
         if hit: break
     if not hit: break
 PY
+
+adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
+adb pull /sdcard/window.xml artifacts/window-after-consent.xml >/dev/null 2>&1 || true
+adb exec-out screencap -p > artifacts/screen-after-consent.png || true
 
 echo "=== Frida setup ==="
 set +e
