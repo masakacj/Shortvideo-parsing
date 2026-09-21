@@ -1,19 +1,19 @@
 {
   "source_url": "https://v.kuaishou.com/7EsP76S3",
-  "run_id": "35616658552",
-  "commit": "8f29ed8cc3720cb61046d2b428e9c400381e75a1",
+  "run_id": "35617766869",
+  "commit": "1a414d7980079884c20f70aa3f5e52197b1c78c3",
   "candidate_count": 0,
   "best": null,
   "candidates": [],
   "diagnostics": {
     "ui_texts": [
-      "欢迎使用快手",
-      "欢迎您使用快手App！快手是一款提供短视频、直播、购物等服务的综合型产品。\n根据《常见类型移动互联网应用程序必要个人信息范围规定》 ，快手属于短视频类APP，为您提供不超过一定时长的视频搜索、播放的短视频服务。\n您同意隐私政策仅代表您知悉和同意使用基本功能时我们处理相关必要个人信息，不代表您同意我们其他扩展功能处理个人信息，其它拓展功能如需收集个人信息，我们将在您使用具体拓展功能时征求您的同意。\n如您已阅读并同意快手基本功能隐私政策，请点击“同意”，开始使用我们的产品及服务！如您不同意快手基本功能隐私政策，可点击“不同意”进入访客模式。欢迎查阅隐私政策摘要、权限列表、第三方SDK清单了解更多详细信息。",
-      "同意并继续",
-      "不同意",
-      "查找"
+      "Welcome to Kwai",
+      "Welcome to use Kuaishou App! Kuaishou is a comprehensive product that provides short videos, live broadcasts, shopping and other services.\nAccording to the \"Regulations on the Scope of Necessary Personal Information for Common Types of Mobile Internet Applications\", Kuaishou is a short video APP that provides you with short video services for video search and playback that do not exceed a certain length of time.\nYou agree that the privacy policy only represents your awareness and consent to the processing of necessary personal information when using basic functions. This does not imply your consent to the processing of personal information for other extended features. For any other extended features that require the collection of personal information, we will seek your consent when you use those specific features.\nIf you have read and agreed to Kuaishou basic functional privacy policy, please click \"Agree\" to start using our products and services! If you do not agree with Kuaishou basic functional privacy policy, you can click \"Disagree\" to enter guest mode. Welcome to check out Privacy Policy Summary, Permission list, and Third -party SDK list for more details.",
+      "Agree and continue",
+      "disagree",
+      "Search"
     ],
-    "resumed_activity": "topResumedActivity=ActivityRecord{f62cfa9 u0 com.smile.gifmaker/com.yxcorp.gifshow.detail.PhotoDetailActivity t8}",
+    "resumed_activity": "topResumedActivity=ActivityRecord{9eb2c97 u0 com.smile.gifmaker/com.yxcorp.gifshow.detail.PhotoDetailActivity t8}",
     "frida_hooks": [],
     "network_classes": [],
     "native_bridge": [
@@ -157,22 +157,20 @@
     "frida_setup": [
       "Frida version: 17.18.0, device ABI: x86_64, server arch: x86_64"
     ],
-    "frida_error": [
-      "Frida probe unavailable; opening all routes without instrumentation."
-    ],
+    "frida_error": [],
     "frida_probe_console_tail": [
-      "Traceback (most recent call last):",
-      "File \"/home/runner/work/Shortvideo-parsing/Shortvideo-parsing/.github/scripts/frida_probe.py\", line 37, in <module>",
-      "pid = device.spawn([package])",
-      "File \"/opt/hostedtoolcache/Python/3.13.15/x64/lib/python3.13/site-packages/frida/__init__.py\", line 646, in spawn",
-      "return _invoke(self._impl.spawn, (program, options, ))",
-      "File \"/opt/hostedtoolcache/Python/3.13.15/x64/lib/python3.13/site-packages/frida/__init__.py\", line 240, in _invoke",
-      "raise error",
-      "frida.NotSupportedError: need Gadget to attach on jailed Android; its default location is: /home/runner/.cache/frida/gadget-android-arm64.so"
+      "Starting: Intent { act=android.intent.action.VIEW dat=https://v.kuaishou.com/... pkg=com.smile.gifmaker }",
+      "Error: Activity not started, unable to resolve Intent { act=android.intent.action.VIEW dat=https://v.kuaishou.com/... flg=0x10000000 pkg=com.smile.gifmaker }",
+      "/system/bin/sh: -p: inaccessible or not found",
+      "Starting: Intent { act=android.intent.action.VIEW dat=https://v.m.chenzhongtech.com/... }",
+      "Starting: Intent { act=android.intent.action.VIEW dat=kwai://work/... pkg=com.smile.gifmaker }",
+      "Starting: Intent { act=android.intent.action.VIEW dat=kwai://work/... pkg=com.smile.gifmaker }",
+      "Opening resolved route: https://v.m.chenzhongtech.com/fw/photo/3xtgkud72h4jz8e?cc=share_copylink&followRefer=151&shareMethod=TOKEN&docId=9&kpn=KUAISHOU&subBiz=BROWSE_SLIDE_PHOTO&photoId=3xtgkud72h4jz8e&shareId=19120284195040&shareToken=X-8BzsJjGk7x21Ew&shareResourceType=PHOTO_OTHER&userId=3x8vq2dqt5btf72&shareType=1&et=1_i%2F2006302341053236162_bs6502&shareMode=APP&efid=3x6myx5gx5p78ga&originShareId=19120284195040&appType=1&shareObjectId=5190398778855289322&shareUrlOpened=0&timestamp=1789973142380",
+      "Opening work-token route: kwai://work/3xtgkud72h4jz8e",
+      "Opening work-numeric route: kwai://work/5190398778855289322",
+      "Frida probe complete: artifacts/frida.jsonl"
     ],
-    "frida_server_log_tail": [
-      "/system/bin/sh: /data/local/tmp/frida-server: inaccessible or not found"
-    ],
+    "frida_server_log_tail": [],
     "app_cache_hits": [
       "GisLiveManifest"
     ]
