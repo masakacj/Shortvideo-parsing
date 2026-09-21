@@ -7,13 +7,14 @@ import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from fractions import Fraction
 from pathlib import Path
 from shutil import which
 
 OUT = Path(os.environ.get("PROBE_OUT", "artifacts"))
 UA = "Mozilla/5.0 (Linux; Android 15; Pixel 9 Pro) AppleWebKit/537.36 Chrome/153 Mobile Safari/537.36"
-MEDIA_HINT = re.compile(r"\.mp4(?:$|\?)|\.m3u8(?:$|\?)|kwaicdn|kwimgs|yximgs|ndcimgs|gifshow|kuaishou", re.I)
+MEDIA_HINT = re.compile(r"\.mp4(?:$|\?)|\.m3u8(?:$|\?)|kwaicdn|kwimgs|yximgs|ndcimgs|djvod|/upic/|photo-video", re.I)
 
 def clean_url(value):
     if not isinstance(value, str):
@@ -156,6 +157,85 @@ def summarize(url):
         "error": rp.get("error") or probe.get("error"),
     }
 
+def collect_diagnostics():
+    diagnostics = {
+        "ui_texts": [],
+        "resumed_activity": None,
+        "frida_hooks": [],
+        "network_classes": [],
+        "native_bridge": [],
+        "install_tail": [],
+        "resolved_video_url": None,
+        "deeplink_strings": [],
+    }
+
+    p = OUT / "window-after.xml"
+    if p.exists():
+        try:
+            root = ET.fromstring(p.read_text(errors="ignore"))
+            seen = set()
+            for node in root.iter("node"):
+                for key in ("text", "content-desc"):
+                    value = (node.attrib.get(key) or "").strip()
+                    if value and value not in seen:
+                        seen.add(value)
+                        diagnostics["ui_texts"].append(value)
+            diagnostics["ui_texts"] = diagnostics["ui_texts"][:200]
+        except Exception:
+            pass
+
+    p = OUT / "activity.txt"
+    if p.exists():
+        text = p.read_text(errors="ignore")
+        for pattern in (
+            r"mResumedActivity:\s+[^\n]*",
+            r"topResumedActivity=[^\n]*",
+            r"ResumedActivity:[^\n]*",
+        ):
+            m = re.search(pattern, text)
+            if m:
+                diagnostics["resumed_activity"] = m.group(0).strip()
+                break
+
+    p = OUT / "frida.jsonl"
+    if p.exists():
+        hooks = []
+        classes = []
+        for line in p.read_text(errors="ignore").splitlines():
+            try:
+                row = json.loads(line)
+                payload = row.get("message", {}).get("payload")
+                if not isinstance(payload, dict):
+                    continue
+                if payload.get("type") == "hook":
+                    hooks.append({
+                        "class": payload.get("className"),
+                        "ok": payload.get("ok"),
+                        "error": payload.get("error"),
+                    })
+                elif payload.get("type") == "class_inventory":
+                    classes.extend(payload.get("classes") or [])
+            except Exception:
+                pass
+        diagnostics["frida_hooks"] = hooks[:100]
+        diagnostics["network_classes"] = sorted(set(classes))[:800]
+
+    for filename, key, limit in (
+        ("native-bridge.txt", "native_bridge", 100),
+        ("install.txt", "install_tail", 40),
+        ("deeplink-strings.txt", "deeplink_strings", 200),
+    ):
+        p = OUT / filename
+        if p.exists():
+            lines = [x.strip() for x in p.read_text(errors="ignore").splitlines() if x.strip()]
+            diagnostics[key] = lines[-limit:] if key == "install_tail" else lines[:limit]
+
+    p = OUT / "resolved-video-url.txt"
+    if p.exists():
+        diagnostics["resolved_video_url"] = p.read_text(errors="ignore").strip()
+
+    return diagnostics
+
 urls = collect_urls()
 rows = []
 seen_public = set()
@@ -178,6 +258,7 @@ result = {
     "candidate_count": len(rows),
     "best": rows[0] if rows else None,
     "candidates": rows,
+    "diagnostics": collect_diagnostics(),
 }
 
 OUT.mkdir(parents=True, exist_ok=True)

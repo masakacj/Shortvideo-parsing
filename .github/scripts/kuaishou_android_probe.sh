@@ -38,6 +38,16 @@ else
   echo "::warning title=APK metadata::aapt not found, install test will continue"
 fi
 
+echo "=== APK deep-link strings ==="
+: > artifacts/deeplink-strings.txt
+for dex in $(unzip -Z1 kuaishou.apk | grep -E '^classes[0-9]*\.dex$' | head -40); do
+  unzip -p kuaishou.apk "$dex" 2>/dev/null | strings 2>/dev/null | \
+    grep -aEo '(kwai|kwaiopenapi|ksnebula|gifshow|kuaishou)://[^[:space:]"<>]{1,300}' >> artifacts/deeplink-strings.txt || true
+done
+sort -u artifacts/deeplink-strings.txt | head -500 > artifacts/deeplink-strings.tmp || true
+mv artifacts/deeplink-strings.tmp artifacts/deeplink-strings.txt
+head -100 artifacts/deeplink-strings.txt || true
+
 set +e
 adb install -r -g kuaishou.apk 2>&1 | tee artifacts/install.txt
 INSTALL_RC=${PIPESTATUS[0]}
@@ -56,6 +66,16 @@ fi
 
 echo "=== Package ==="
 adb shell dumpsys package "$PACKAGE_NAME" > artifacts/package.txt || true
+adb shell cmd package query-activities -a android.intent.action.VIEW -d "$VIDEO_URL" > artifacts/url-handlers-original.txt 2>&1 || true
+
+RESOLVED_VIDEO_URL=$(curl -Ls --max-time 20 \
+  -A 'Mozilla/5.0 (Linux; Android 15; Pixel 9 Pro) AppleWebKit/537.36 Chrome/153 Mobile Safari/537.36' \
+  -o /dev/null -w '%{url_effective}' "$VIDEO_URL" || true)
+if [ -z "$RESOLVED_VIDEO_URL" ]; then
+  RESOLVED_VIDEO_URL="$VIDEO_URL"
+fi
+printf '%s\n' "$RESOLVED_VIDEO_URL" | tee artifacts/resolved-video-url.txt
+adb shell cmd package query-activities -a android.intent.action.VIEW -d "$RESOLVED_VIDEO_URL" > artifacts/url-handlers-resolved.txt 2>&1 || true
 
 # Default/API emulator images are rootable. Frida is best-effort; the run still
 # produces logcat/UI artifacts if instrumentation is unavailable.
@@ -124,7 +144,7 @@ if [ -n "$FRIDA_VER" ] && [ -n "$FRIDA_ARCH" ]; then
   adb shell chmod 755 /data/local/tmp/frida-server
   adb shell '/data/local/tmp/frida-server >/data/local/tmp/frida-server.log 2>&1 &' || true
   sleep 3
-  PACKAGE_NAME="$PACKAGE_NAME" VIDEO_URL="$VIDEO_URL" PROBE_SECONDS="$PROBE_SECONDS" PROBE_OUT=artifacts python3 .github/scripts/frida_probe.py
+  PACKAGE_NAME="$PACKAGE_NAME" VIDEO_URL="$VIDEO_URL" RESOLVED_VIDEO_URL="$RESOLVED_VIDEO_URL" PROBE_SECONDS="$PROBE_SECONDS" PROBE_OUT=artifacts python3 .github/scripts/frida_probe.py
   FRIDA_RC=$?
 else
   FRIDA_RC=1
@@ -134,6 +154,10 @@ set -e
 if [ "${FRIDA_RC:-1}" -ne 0 ]; then
   echo "Frida probe unavailable; opening link without instrumentation." | tee artifacts/frida-error.txt
   adb shell am start -a android.intent.action.VIEW -d "$VIDEO_URL" -p "$PACKAGE_NAME" || true
+  sleep 20
+  if [ "$RESOLVED_VIDEO_URL" != "$VIDEO_URL" ]; then
+    adb shell am start -a android.intent.action.VIEW -d "$RESOLVED_VIDEO_URL" -p "$PACKAGE_NAME" || true
+  fi
   sleep "$PROBE_SECONDS"
 fi
 

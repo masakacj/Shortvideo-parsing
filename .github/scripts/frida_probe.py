@@ -10,6 +10,7 @@ import frida
 
 package = os.environ.get("PACKAGE_NAME", "com.smile.gifmaker")
 video_url = os.environ.get("VIDEO_URL", "https://v.kuaishou.com/7EsP76S3")
+resolved_video_url = os.environ.get("RESOLVED_VIDEO_URL", "").strip() or video_url
 duration = int(os.environ.get("PROBE_SECONDS", "75"))
 out = Path(os.environ.get("PROBE_OUT", "artifacts"))
 out.mkdir(parents=True, exist_ok=True)
@@ -64,6 +65,18 @@ subprocess.run([
 ], check=False)
 
 deadline = time.time() + duration
+first_observation = min(20, max(5, duration // 3))
+time.sleep(first_observation)
+
+if resolved_video_url != video_url:
+    print("Opening resolved URL:", resolved_video_url)
+    subprocess.run([
+        "adb", "shell", "am", "start",
+        "-a", "android.intent.action.VIEW",
+        "-d", resolved_video_url,
+        "-p", package
+    ], check=False)
+
 while time.time() < deadline:
     time.sleep(1)
 
