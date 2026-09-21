@@ -26,7 +26,9 @@ def clean_url(value):
 def collect_urls():
     all_urls = set()
     target_urls = set()
+    delta_urls = set()
     target_meta = {}
+    delta_meta = {}
 
     p = OUT / "frida.jsonl"
     if p.exists():
@@ -53,6 +55,22 @@ def collect_urls():
                             "distance": distance,
                             "address": payload.get("address"),
                         }
+                elif payload.get("kind") == "snapshot-delta":
+                    delta_urls.add(u)
+                    label = payload.get("snapshot") or "target"
+                    order_map = {
+                        "target-5s": 5,
+                        "target-15s": 15,
+                        "target-30s": 30,
+                        "target-50s": 50,
+                    }
+                    current = delta_meta.get(u)
+                    order = order_map.get(label, 999)
+                    if current is None or order < current.get("snapshot_order", 999):
+                        delta_meta[u] = {
+                            "snapshot": label,
+                            "snapshot_order": order,
+                        }
             except Exception:
                 pass
 
@@ -60,7 +78,13 @@ def collect_urls():
         (OUT / "target-candidate-urls.txt").write_text(
             "\n".join(sorted(target_urls)) + "\n", encoding="utf-8"
         )
-        return sorted(target_urls), target_meta, True
+        return sorted(target_urls), target_meta, True, "id-neighborhood"
+
+    if delta_urls:
+        (OUT / "target-candidate-urls.txt").write_text(
+            "\n".join(sorted(delta_urls)) + "\n", encoding="utf-8"
+        )
+        return sorted(delta_urls), delta_meta, True, "temporal-delta"
 
     for name in ("logcat.txt", "candidate-urls.txt", "app-cache-strings.txt"):
         p = OUT / name
@@ -72,7 +96,7 @@ def collect_urls():
             if u and MEDIA_HINT.search(u):
                 all_urls.add(u)
 
-    return sorted(all_urls), target_meta, False
+    return sorted(all_urls), target_meta, False, "fallback"
 
 def fraction(value):
     try:
@@ -201,6 +225,7 @@ def collect_diagnostics():
         "target_scan": [],
         "target_hits": [],
         "target_snippets": [],
+        "snapshots": [],
     }
 
     p = OUT / "window-after.xml"
@@ -238,6 +263,7 @@ def collect_diagnostics():
         target_scans = []
         target_hits = []
         target_snippets = []
+        snapshots = []
         for line in p.read_text(errors="ignore").splitlines():
             try:
                 row = json.loads(line)
@@ -276,6 +302,13 @@ def collect_diagnostics():
                         "distance": payload.get("distance"),
                         "snippet": payload.get("snippet"),
                     })
+                elif payload.get("type") == "snapshot":
+                    snapshots.append({
+                        "label": payload.get("label"),
+                        "total_urls": payload.get("total_urls"),
+                        "new_urls": payload.get("new_urls"),
+                        "bytes_scanned": payload.get("bytes_scanned"),
+                    })
             except Exception:
                 pass
         diagnostics["frida_hooks"] = hooks[:100]
@@ -283,6 +316,7 @@ def collect_diagnostics():
         diagnostics["target_scan"] = target_scans[-50:]
         diagnostics["target_hits"] = target_hits[:100]
         diagnostics["target_snippets"] = target_snippets[:250]
+        diagnostics["snapshots"] = snapshots[-50:]
 
     for filename, key, limit in (
         ("native-bridge.txt", "native_bridge", 100),
@@ -328,21 +362,40 @@ def collect_diagnostics():
 
     return diagnostics
 
-urls, target_meta, targeted = collect_urls()
+urls, target_meta, targeted, target_mode = collect_urls()
 rows = []
 seen_public = set()
 for url in urls:
     row = summarize(url)
+    if targeted:
+        content_type = (row.get("content_type") or "").lower()
+        public_url = row.get("url") or ""
+        if not (
+            content_type.startswith("video/")
+            or re.search(r"\.(?:mp4|m3u8)(?:$|[?&#])", public_url, re.I)
+        ):
+            continue
     if url in target_meta:
         row["target"] = target_meta[url].get("target")
         row["target_distance"] = target_meta[url].get("distance")
+        row["snapshot"] = target_meta[url].get("snapshot")
+        row["snapshot_order"] = target_meta[url].get("snapshot_order")
     key = (row["url"], row.get("size"), row.get("codec"), row.get("fps"))
     if key in seen_public:
         continue
     seen_public.add(key)
     rows.append(row)
 
-if targeted:
+if target_mode == "temporal-delta":
+    rows.sort(key=lambda x: (
+        x.get("snapshot_order") if isinstance(x.get("snapshot_order"), (int, float)) else 999,
+        -((x.get("_rank") or [0])[0] or 0),
+        -((x.get("_rank") or [0, 0])[1] or 0),
+        -((x.get("_rank") or [0, 0, 0])[2] or 0),
+        -((x.get("_rank") or [0, 0, 0, 0])[3] or 0),
+        -((x.get("_rank") or [0, 0, 0, 0, 0])[4] or 0),
+    ))
+elif targeted:
     rows.sort(key=lambda x: (
         x.get("target_distance") if isinstance(x.get("target_distance"), (int, float)) else 1 << 60,
         -((x.get("_rank") or [0])[0] or 0),
@@ -362,6 +415,7 @@ result = {
     "commit": os.environ.get("GITHUB_SHA"),
     "candidate_count": len(rows),
     "targeted": targeted,
+    "target_mode": target_mode,
     "best": rows[0] if rows else None,
     "candidates": rows,
     "diagnostics": collect_diagnostics(),
@@ -374,12 +428,12 @@ lines = [
     "# Kuaishou Android Probe",
     "",
     f"Candidates: {len(rows)}",
-    f"Targeted memory candidates: {'yes' if targeted else 'no (fallback scan)'}",
+    f"Target mode: {target_mode}",
     "",
 ]
 if rows:
     lines += [
-        "| # | Target distance | Resolution | FPS | Codec | Bitrate | Size | Host | Path |",
+        "| # | Target signal | Resolution | FPS | Codec | Bitrate | Size | Host | Path |",
         "|---:|---:|---|---:|---|---:|---:|---|---|",
     ]
     for i, r in enumerate(rows, 1):
@@ -388,7 +442,7 @@ if rows:
         br = r.get("video_bitrate") or r.get("format_bitrate") or ""
         size = r.get("size") or ""
         path = urllib.parse.urlsplit(r.get("url") or "").path
-        distance = r.get("target_distance") if targeted else ""
+        distance = r.get("target_distance") if target_mode == "id-neighborhood" else r.get("snapshot") if target_mode == "temporal-delta" else ""
         lines.append(f"| {i} | {distance} | {res} | {fps} | {r.get('codec') or ''} | {br} | {size} | {r.get('host') or ''} | `{path}` |")
 else:
     lines.append("No media candidates were captured.")

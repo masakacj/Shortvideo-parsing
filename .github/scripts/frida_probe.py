@@ -54,56 +54,60 @@ def on_message(message, data):
 script.on("message", on_message)
 script.load()
 
-targets = []
-for value in (work_numeric, work_token):
-    if value and value not in targets:
-        targets.append(value)
-try:
-    configured = script.exports_sync.configure(targets)
-    print("Target memory probe configured:", configured)
-except Exception as exc:
-    print("Target memory probe configure failed:", exc)
-
 try:
     device.resume(pid)
 except Exception:
     pass
 
-time.sleep(4)
+time.sleep(5)
+
+try:
+    baseline = script.exports_sync.snapshot("baseline")
+    print("Baseline media snapshot:", baseline)
+except Exception as exc:
+    print("Baseline snapshot failed:", exc)
+
+if work_token:
+    target_label = "work-token"
+    target_route = f"kwai://work/{work_token}"
+elif work_numeric:
+    target_label = "work-numeric"
+    target_route = f"kwai://work/{work_numeric}"
+elif resolved_video_url:
+    target_label = "resolved"
+    target_route = resolved_video_url
+else:
+    target_label = "share"
+    target_route = video_url
+
+print(f"Opening isolated target route ({target_label}):", target_route)
 subprocess.run([
     "adb", "shell", "am", "start",
     "-a", "android.intent.action.VIEW",
-    "-d", video_url,
+    "-d", target_route,
     "-p", package
 ], check=False)
 
-routes = []
-if resolved_video_url != video_url:
-    routes.append(("resolved", resolved_video_url))
-if work_token:
-    routes.append(("work-token", f"kwai://work/{work_token}"))
-if work_numeric:
-    routes.append(("work-numeric", f"kwai://work/{work_numeric}"))
+started = time.time()
+deadline = started + duration
+schedule = [
+    (5, "target-5s"),
+    (15, "target-15s"),
+    (30, "target-30s"),
+    (50, "target-50s"),
+]
 
-deadline = time.time() + duration
-segments = max(1, len(routes) + 1)
-segment_seconds = max(8, duration // segments)
-
-for label, route in routes:
-    time.sleep(min(segment_seconds, max(0, deadline - time.time())))
-    if time.time() >= deadline:
+for seconds_after_open, label in schedule:
+    if seconds_after_open >= duration:
         break
-    print(f"Opening {label} route:", route)
-    subprocess.run([
-        "adb", "shell", "am", "start",
-        "-a", "android.intent.action.VIEW",
-        "-d", route,
-        "-p", package
-    ], check=False)
+    wait = started + seconds_after_open - time.time()
+    if wait > 0:
+        time.sleep(wait)
     try:
-        script.exports_sync.configure(targets)
+        snap = script.exports_sync.snapshot(label)
+        print(f"Media snapshot {label}:", snap)
     except Exception as exc:
-        print("Target rescan configure failed:", exc)
+        print(f"Media snapshot {label} failed:", exc)
 
 while time.time() < deadline:
     time.sleep(1)

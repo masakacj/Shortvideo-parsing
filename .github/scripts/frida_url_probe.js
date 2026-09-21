@@ -3,6 +3,7 @@
 const seen = Object.create(null);
 let targetIds = [];
 let scanTimer = null;
+let snapshotBaseline = Object.create(null);
 
 function sendOnce(type, key, payload) {
   const id = type + "\n" + key;
@@ -346,6 +347,80 @@ function targetedMemoryScan() {
   });
 }
 
+function collectMediaUrlSnapshot() {
+  const found = Object.create(null);
+  let bytesScanned = 0;
+  const maxRange = 64 * 1024 * 1024;
+  const maxTotal = 256 * 1024 * 1024;
+  const patterns = [
+    "68 74 74 70 73 3a 2f 2f",
+    "68 74 74 70 3a 2f 2f"
+  ];
+
+  const ranges = Process.enumerateRanges("rw-");
+  for (const range of ranges) {
+    if (bytesScanned >= maxTotal) break;
+    if (range.size <= 0 || range.size > maxRange) continue;
+    if (bytesScanned + range.size > maxTotal) break;
+    bytesScanned += range.size;
+
+    for (const pattern of patterns) {
+      let matches = [];
+      try {
+        matches = Memory.scanSync(range.base, range.size, pattern);
+      } catch (_) {
+        continue;
+      }
+
+      for (const match of matches.slice(0, 250)) {
+        const raw = safeReadUtf8(match.address, 4096);
+        const url = normalizeUrl(raw);
+        if (url && looksInteresting(url)) {
+          found[url] = true;
+        }
+      }
+    }
+  }
+
+  return { urls: Object.keys(found), bytesScanned: bytesScanned };
+}
+
+function temporalSnapshot(label) {
+  const snap = collectMediaUrlSnapshot();
+  const added = [];
+
+  if (label === "baseline") {
+    snapshotBaseline = Object.create(null);
+    snap.urls.forEach(function (url) {
+      snapshotBaseline[url] = true;
+    });
+  } else {
+    snap.urls.forEach(function (url) {
+      if (!snapshotBaseline[url]) {
+        added.push(url);
+        report("snapshot-delta", url, { snapshot: label });
+        snapshotBaseline[url] = true;
+      }
+    });
+  }
+
+  send({
+    type: "snapshot",
+    label: label,
+    total_urls: snap.urls.length,
+    new_urls: added.length,
+    bytes_scanned: snap.bytesScanned,
+    ts: Date.now()
+  });
+
+  return {
+    label: label,
+    total_urls: snap.urls.length,
+    new_urls: added.length,
+    bytes_scanned: snap.bytesScanned
+  };
+}
+
 function nativeInit() {
   try {
     const modules = Process.enumerateModules()
@@ -372,6 +447,9 @@ function nativeInit() {
 }
 
 rpc.exports = {
+  snapshot: function (label) {
+    return temporalSnapshot(String(label || "snapshot"));
+  },
   configure: function (ids) {
     targetIds = (ids || []).map(String).filter(function (x, i, a) {
       return x && a.indexOf(x) === i;
