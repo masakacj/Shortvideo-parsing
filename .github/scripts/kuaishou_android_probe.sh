@@ -132,10 +132,12 @@ adb exec-out screencap -p > artifacts/screen-before.png || true
 python3 - <<'PY'
 import re, subprocess, time, xml.etree.ElementTree as ET
 positive = [
+    "优化","立即优化","去优化",
     "同意并继续","同意并使用","同意","允许","继续","我知道了","知道了","跳过","以后再说",
     "Agree and continue","Agree and Continue","Agree","Allow","Continue","Got it","Skip","Not now",
 ]
-for _ in range(8):
+idle_rounds = 0
+for _ in range(20):
     subprocess.run(["adb","shell","uiautomator","dump","/sdcard/window.xml"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     p=subprocess.run(["adb","shell","cat","/sdcard/window.xml"], text=True, capture_output=True)
     try: root=ET.fromstring(p.stdout)
@@ -153,11 +155,16 @@ for _ in range(8):
                     y=(int(m.group(2))+int(m.group(4)))//2
                     subprocess.run(["adb","shell","input","tap",str(x),str(y)])
                     print("Tapped",wanted,x,y)
-                    time.sleep(2)
+                    time.sleep(12 if "优化" in wanted else 3)
+                    idle_rounds = 0
                     hit=True
                     break
         if hit: break
-    if not hit: break
+    if not hit:
+        idle_rounds += 1
+        if idle_rounds >= 5:
+            break
+        time.sleep(2)
 PY
 
 adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
