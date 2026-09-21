@@ -18,6 +18,8 @@ for prop in ro.product.cpu.abi ro.product.cpu.abilist ro.dalvik.vm.native.bridge
   adb shell getprop "$prop" | tr -d '\r' | tee -a artifacts/native-bridge.txt
 done
 adb shell 'find /system /vendor -iname "*ndk_translation*" -o -iname "*native_bridge*" 2>/dev/null | head -100'   | tee -a artifacts/native-bridge.txt || true
+BRIDGE_SUMMARY=$(tr '\n' ';' < artifacts/native-bridge.txt)
+echo "::notice title=Android ABI / native bridge::${BRIDGE_SUMMARY}"
 
 echo "=== APK ==="
 aapt dump badging kuaishou.apk | grep -E "^package:|^sdkVersion:|^targetSdkVersion:|^native-code:" | tee artifacts/apk.txt
@@ -32,6 +34,8 @@ if [ "$INSTALL_RC" -ne 0 ]; then
 fi
 set -e
 if [ "$INSTALL_RC" -ne 0 ]; then
+  INSTALL_SUMMARY=$(tr '\n' ';' < artifacts/install.txt)
+  echo "::error title=Kuaishou APK installation failed::${INSTALL_SUMMARY}"
   echo "APK installation failed. See artifacts/install.txt and native-bridge.txt." >&2
   exit "$INSTALL_RC"
 fi
