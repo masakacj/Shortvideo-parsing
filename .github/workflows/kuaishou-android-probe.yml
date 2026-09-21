@@ -28,8 +28,8 @@ permissions:
 jobs:
   probe:
     name: Probe Kuaishou app network
-    runs-on: macos-26
-    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -39,6 +39,13 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.13"
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
 
       - name: Download Kuaishou APK
         env:
@@ -50,23 +57,25 @@ jobs:
           ls -lh kuaishou.apk
           shasum -a 256 kuaishou.apk
 
-      - name: Run ARM64 Android probe
+      - name: Run x86_64 Android probe with ARM translation
         uses: reactivecircus/android-emulator-runner@v2
         env:
           PACKAGE_NAME: com.smile.gifmaker
           VIDEO_URL: ${{ inputs.video_url }}
           PROBE_SECONDS: ${{ inputs.probe_seconds }}
         with:
-          api-level: 30
-          target: default
-          arch: arm64-v8a
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
           cores: 2
-          ram-size: 3072M
+          ram-size: 4096M
           heap-size: 512M
           disk-size: 6G
-          emulator-boot-timeout: 900
+          emulator-boot-timeout: 600
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          disable-spellchecker: true
+          emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim -camera-back none
           script: bash .github/scripts/kuaishou_android_probe.sh
 
       - name: Upload probe artifacts

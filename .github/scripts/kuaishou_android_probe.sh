@@ -12,9 +12,29 @@ adb shell getprop | tee -a artifacts/device.txt
 adb shell wm size | tee -a artifacts/device.txt
 adb shell wm density | tee -a artifacts/device.txt
 
+echo "=== Native bridge / ABI ===" | tee artifacts/native-bridge.txt
+for prop in ro.product.cpu.abi ro.product.cpu.abilist ro.dalvik.vm.native.bridge ro.enable.native.bridge.exec; do
+  printf '%s=' "$prop" | tee -a artifacts/native-bridge.txt
+  adb shell getprop "$prop" | tr -d '\r' | tee -a artifacts/native-bridge.txt
+done
+adb shell 'find /system /vendor -iname "*ndk_translation*" -o -iname "*native_bridge*" 2>/dev/null | head -100'   | tee -a artifacts/native-bridge.txt || true
+
 echo "=== APK ==="
 aapt dump badging kuaishou.apk | grep -E "^package:|^sdkVersion:|^targetSdkVersion:|^native-code:" | tee artifacts/apk.txt
-adb install -r -g kuaishou.apk | tee artifacts/install.txt
+
+set +e
+adb install -r -g kuaishou.apk 2>&1 | tee artifacts/install.txt
+INSTALL_RC=${PIPESTATUS[0]}
+if [ "$INSTALL_RC" -ne 0 ]; then
+  echo "Normal install failed; retrying with explicit arm64-v8a ABI." | tee -a artifacts/install.txt
+  adb install --abi arm64-v8a -r -g kuaishou.apk 2>&1 | tee -a artifacts/install.txt
+  INSTALL_RC=${PIPESTATUS[0]}
+fi
+set -e
+if [ "$INSTALL_RC" -ne 0 ]; then
+  echo "APK installation failed. See artifacts/install.txt and native-bridge.txt." >&2
+  exit "$INSTALL_RC"
+fi
 
 echo "=== Package ==="
 adb shell dumpsys package "$PACKAGE_NAME" > artifacts/package.txt || true
@@ -70,10 +90,17 @@ PY
 
 echo "=== Frida setup ==="
 set +e
-python3 -m pip install --user --quiet frida-tools
+python3 -m pip install --quiet frida-tools
 FRIDA_VER=$(python3 -c 'import frida; print(frida.__version__)' 2>/dev/null)
-if [ -n "$FRIDA_VER" ]; then
-  curl -fL --retry 3 -o /tmp/frida-server.xz "https://github.com/frida/frida/releases/download/$FRIDA_VER/frida-server-$FRIDA_VER-android-arm64.xz"
+DEVICE_ABI=$(adb shell getprop ro.product.cpu.abi 2>/dev/null | tr -d '\r')
+case "$DEVICE_ABI" in
+  x86_64) FRIDA_ARCH="x86_64" ;;
+  arm64-v8a|arm64) FRIDA_ARCH="arm64" ;;
+  *) FRIDA_ARCH="" ;;
+esac
+echo "Frida version: ${FRIDA_VER:-unknown}, device ABI: ${DEVICE_ABI:-unknown}, server arch: ${FRIDA_ARCH:-unknown}"   | tee artifacts/frida-setup.txt
+if [ -n "$FRIDA_VER" ] && [ -n "$FRIDA_ARCH" ]; then
+  curl -fL --retry 3 -o /tmp/frida-server.xz "https://github.com/frida/frida/releases/download/$FRIDA_VER/frida-server-$FRIDA_VER-android-$FRIDA_ARCH.xz"
   xz -df /tmp/frida-server.xz
   adb push /tmp/frida-server /data/local/tmp/frida-server
   adb shell chmod 755 /data/local/tmp/frida-server
