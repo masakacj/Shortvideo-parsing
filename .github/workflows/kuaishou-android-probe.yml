@@ -40,9 +40,6 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           ls -l /dev/kvm
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Download Kuaishou APK
         shell: bash
         run: |
