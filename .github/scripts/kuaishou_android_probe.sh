@@ -22,7 +22,21 @@ BRIDGE_SUMMARY=$(tr '\n' ';' < artifacts/native-bridge.txt)
 echo "::notice title=Android ABI / native bridge::${BRIDGE_SUMMARY}"
 
 echo "=== APK ==="
-aapt dump badging kuaishou.apk | grep -E "^package:|^sdkVersion:|^targetSdkVersion:|^native-code:" | tee artifacts/apk.txt
+AAPT_BIN=$(command -v aapt || true)
+if [ -z "$AAPT_BIN" ]; then
+  SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+  if [ -n "$SDK_ROOT" ] && [ -d "$SDK_ROOT/build-tools" ]; then
+    AAPT_BIN=$(find "$SDK_ROOT/build-tools" -maxdepth 2 -type f -name aapt -perm -111 2>/dev/null | sort -V | tail -n 1)
+  fi
+fi
+if [ -n "$AAPT_BIN" ]; then
+  "$AAPT_BIN" dump badging kuaishou.apk > artifacts/apk-badging.txt 2>&1 || true
+  grep -E "^package:|^sdkVersion:|^targetSdkVersion:|^native-code:" artifacts/apk-badging.txt | tee artifacts/apk.txt || true
+  echo "::notice title=APK metadata::$(tr '\n' ';' < artifacts/apk.txt)"
+else
+  echo "aapt not found; continuing directly to adb install." | tee artifacts/apk.txt
+  echo "::warning title=APK metadata::aapt not found, install test will continue"
+fi
 
 set +e
 adb install -r -g kuaishou.apk 2>&1 | tee artifacts/install.txt
