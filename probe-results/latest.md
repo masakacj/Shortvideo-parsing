@@ -1,7 +1,5 @@
 # Kuaishou Android Probe
 
-Candidates: 1
+Candidates: 0
 
-| # | Resolution | FPS | Codec | Bitrate | Size | Host | Path |
-|---:|---|---:|---|---:|---:|---|---|
-| 1 | ?×? |  |  |  | 18750 | m.kuaishou.com | `/` |
+No media candidates were captured.
