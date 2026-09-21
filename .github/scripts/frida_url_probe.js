@@ -1,6 +1,8 @@
 'use strict';
 
 const seen = Object.create(null);
+let targetIds = [];
+let scanTimer = null;
 
 function sendOnce(type, key, payload) {
   const id = type + "\n" + key;
@@ -20,10 +22,11 @@ function looksInteresting(url) {
   return /\.mp4(?:$|[?&#])|\.m3u8(?:$|[?&#])|kwaicdn|kwimgs|yximgs|ndcimgs|djvod|\/upic\/|photo-video|manifest|videoresource|adaptation|representation/i.test(url);
 }
 
-function report(kind, value) {
+function report(kind, value, extra) {
   const url = normalizeUrl(value);
   if (!url || !looksInteresting(url)) return;
-  sendOnce("url", kind + "\n" + url, { kind: kind, url: url });
+  const payload = Object.assign({ kind: kind, url: url }, extra || {});
+  sendOnce("url", kind + "\n" + (payload.target || "") + "\n" + url, payload);
 }
 
 function safeUse(name, fn) {
@@ -159,10 +162,21 @@ function installJavaHooks() {
 
 function safeReadUtf8(ptrValue, maxLen) {
   try {
-    return ptrValue.readUtf8String(maxLen || 2048) || "";
+    return ptrValue.readUtf8String(maxLen || 4096) || "";
   } catch (_) {
     return "";
   }
+}
+
+function stringPattern(value, utf16) {
+  const bytes = [];
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code > 0x7f) return "";
+    bytes.push(code.toString(16).padStart(2, "0"));
+    if (utf16) bytes.push("00");
+  }
+  return bytes.join(" ");
 }
 
 function installGetaddrinfoHook() {
@@ -183,48 +197,153 @@ function installGetaddrinfoHook() {
   }
 }
 
-function scanMemoryForUrls() {
-  let scanned = 0;
-  let hits = 0;
-  const maxTotal = 192 * 1024 * 1024;
-  const maxRange = 64 * 1024 * 1024;
+function boundedWindow(range, address, radius) {
+  const rangeStart = range.base;
+  const rangeEnd = range.base.add(range.size);
+  let start = address.sub(radius);
+  if (start.compare(rangeStart) < 0) start = rangeStart;
+  let end = address.add(radius);
+  if (end.compare(rangeEnd) > 0) end = rangeEnd;
+  const size = end.sub(start).toUInt32();
+  return { base: start, size: size };
+}
+
+function scanWindowForUrls(windowInfo, target, hitAddress) {
+  let urlHits = 0;
   const patterns = [
     "68 74 74 70 73 3a 2f 2f",
     "68 74 74 70 3a 2f 2f"
   ];
 
-  try {
-    const ranges = Process.enumerateRanges("rw-");
-    for (const range of ranges) {
-      if (scanned >= maxTotal) break;
-      if (range.size <= 0 || range.size > maxRange) continue;
-      if (scanned + range.size > maxTotal) break;
-      scanned += range.size;
+  for (const pattern of patterns) {
+    let matches = [];
+    try {
+      matches = Memory.scanSync(windowInfo.base, windowInfo.size, pattern);
+    } catch (_) {
+      continue;
+    }
 
-      for (const pattern of patterns) {
+    for (const match of matches.slice(0, 120)) {
+      const raw = safeReadUtf8(match.address, 4096);
+      const url = normalizeUrl(raw);
+      if (!url || !looksInteresting(url)) continue;
+      const distance = Math.abs(match.address.sub(hitAddress).toInt32());
+      urlHits += 1;
+      report("target-memory", url, {
+        target: target,
+        distance: distance,
+        address: String(match.address)
+      });
+    }
+  }
+  return urlHits;
+}
+
+function scanWindowForKeywords(windowInfo, target, hitAddress) {
+  const keywords = [
+    "manifest", "adaptationSet", "representation", "videoResource",
+    "photoUrl", "playUrl", "H265", "HEVC", "AVC", "1080", "1440",
+    "2160", "bitrate", "qualityLabel", "qualityType", "frameRate",
+    "fileSize", "mainMvUrls"
+  ];
+
+  let keywordHits = 0;
+  for (const keyword of keywords) {
+    const pattern = stringPattern(keyword, false);
+    if (!pattern) continue;
+    let matches = [];
+    try {
+      matches = Memory.scanSync(windowInfo.base, windowInfo.size, pattern);
+    } catch (_) {
+      continue;
+    }
+
+    for (const match of matches.slice(0, 8)) {
+      const snippet = safeReadUtf8(match.address, 1200);
+      if (!snippet) continue;
+      const distance = Math.abs(match.address.sub(hitAddress).toInt32());
+      keywordHits += 1;
+      sendOnce("target_snippet", target + "\n" + keyword + "\n" + snippet.slice(0, 700), {
+        target: target,
+        keyword: keyword,
+        distance: distance,
+        address: String(match.address),
+        snippet: snippet.slice(0, 700)
+      });
+    }
+  }
+  return keywordHits;
+}
+
+function targetedMemoryScan() {
+  if (!targetIds.length) {
+    send({ type: "target_scan", targets: [], error: "no targets", ts: Date.now() });
+    return;
+  }
+
+  const ranges = Process.enumerateRanges("rw-");
+  let bytesScanned = 0;
+  let targetHits = 0;
+  let urlHits = 0;
+  let keywordHits = 0;
+  const maxRange = 96 * 1024 * 1024;
+  const maxTotal = 512 * 1024 * 1024;
+  const radius = 2 * 1024 * 1024;
+  const windowsSeen = Object.create(null);
+
+  for (const range of ranges) {
+    if (bytesScanned >= maxTotal) break;
+    if (range.size <= 0 || range.size > maxRange) continue;
+    bytesScanned += range.size;
+
+    for (const target of targetIds) {
+      const patterns = [
+        { encoding: "ascii", value: stringPattern(target, false) },
+        { encoding: "utf16le", value: stringPattern(target, true) }
+      ];
+
+      for (const spec of patterns) {
+        if (!spec.value) continue;
         let matches = [];
         try {
-          matches = Memory.scanSync(range.base, range.size, pattern);
+          matches = Memory.scanSync(range.base, range.size, spec.value);
         } catch (_) {
           continue;
         }
 
-        for (const match of matches.slice(0, 40)) {
-          const raw = safeReadUtf8(match.address, 2048);
-          const url = normalizeUrl(raw);
-          if (url && looksInteresting(url)) {
-            hits += 1;
-            report("native-memory", url);
-          }
+        for (const match of matches.slice(0, 10)) {
+          targetHits += 1;
+          const windowInfo = boundedWindow(range, match.address, radius);
+          const windowKey = target + ":" + String(windowInfo.base) + ":" + windowInfo.size;
+          if (windowsSeen[windowKey]) continue;
+          windowsSeen[windowKey] = true;
+
+          const direct = safeReadUtf8(match.address, 1400);
+          sendOnce("target_hit", target + "\n" + spec.encoding + "\n" + String(match.address), {
+            target: target,
+            encoding: spec.encoding,
+            address: String(match.address),
+            range_base: String(range.base),
+            range_size: range.size,
+            direct: direct.slice(0, 1000)
+          });
+
+          urlHits += scanWindowForUrls(windowInfo, target, match.address);
+          keywordHits += scanWindowForKeywords(windowInfo, target, match.address);
         }
       }
     }
-  } catch (e) {
-    send({ type: "memory_scan", error: String(e), ts: Date.now() });
-    return;
   }
 
-  send({ type: "memory_scan", scanned_bytes: scanned, hits: hits, ts: Date.now() });
+  send({
+    type: "target_scan",
+    targets: targetIds,
+    bytes_scanned: bytesScanned,
+    target_hits: targetHits,
+    url_hits: urlHits,
+    keyword_hits: keywordHits,
+    ts: Date.now()
+  });
 }
 
 function nativeInit() {
@@ -250,9 +369,25 @@ function nativeInit() {
   }
 
   installGetaddrinfoHook();
-  scanMemoryForUrls();
-  setInterval(scanMemoryForUrls, 7000);
 }
+
+rpc.exports = {
+  configure: function (ids) {
+    targetIds = (ids || []).map(String).filter(function (x, i, a) {
+      return x && a.indexOf(x) === i;
+    });
+    send({ type: "target_config", targets: targetIds, ts: Date.now() });
+
+    if (scanTimer !== null) {
+      clearInterval(scanTimer);
+      scanTimer = null;
+    }
+
+    targetedMemoryScan();
+    scanTimer = setInterval(targetedMemoryScan, 8000);
+    return targetIds;
+  }
+};
 
 nativeInit();
 installJavaHooks();

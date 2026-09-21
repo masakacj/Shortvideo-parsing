@@ -53,6 +53,17 @@ def on_message(message, data):
 
 script.on("message", on_message)
 script.load()
+
+targets = []
+for value in (work_numeric, work_token):
+    if value and value not in targets:
+        targets.append(value)
+try:
+    configured = script.exports_sync.configure(targets)
+    print("Target memory probe configured:", configured)
+except Exception as exc:
+    print("Target memory probe configure failed:", exc)
+
 try:
     device.resume(pid)
 except Exception:
@@ -89,6 +100,10 @@ for label, route in routes:
         "-d", route,
         "-p", package
     ], check=False)
+    try:
+        script.exports_sync.configure(targets)
+    except Exception as exc:
+        print("Target rescan configure failed:", exc)
 
 while time.time() < deadline:
     time.sleep(1)

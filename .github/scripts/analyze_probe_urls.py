@@ -24,19 +24,43 @@ def clean_url(value):
     return value if value.startswith(("http://", "https://")) else ""
 
 def collect_urls():
-    urls = set()
+    all_urls = set()
+    target_urls = set()
+    target_meta = {}
+
     p = OUT / "frida.jsonl"
     if p.exists():
         for line in p.read_text(errors="ignore").splitlines():
             try:
                 row = json.loads(line)
                 payload = row.get("message", {}).get("payload")
-                if isinstance(payload, dict) and payload.get("type") == "url":
-                    u = clean_url(payload.get("url"))
-                    if u and MEDIA_HINT.search(u):
-                        urls.add(u)
+                if not isinstance(payload, dict) or payload.get("type") != "url":
+                    continue
+                u = clean_url(payload.get("url"))
+                if not u or not MEDIA_HINT.search(u):
+                    continue
+                all_urls.add(u)
+                if payload.get("kind") == "target-memory":
+                    target_urls.add(u)
+                    current = target_meta.get(u)
+                    distance = payload.get("distance")
+                    if current is None or (
+                        isinstance(distance, (int, float))
+                        and distance < (current.get("distance") if isinstance(current.get("distance"), (int, float)) else 1 << 60)
+                    ):
+                        target_meta[u] = {
+                            "target": payload.get("target"),
+                            "distance": distance,
+                            "address": payload.get("address"),
+                        }
             except Exception:
                 pass
+
+    if target_urls:
+        (OUT / "target-candidate-urls.txt").write_text(
+            "\n".join(sorted(target_urls)) + "\n", encoding="utf-8"
+        )
+        return sorted(target_urls), target_meta, True
 
     for name in ("logcat.txt", "candidate-urls.txt", "app-cache-strings.txt"):
         p = OUT / name
@@ -46,8 +70,9 @@ def collect_urls():
         for raw in re.findall(r"https?://[^\s\"'<>]+", text):
             u = clean_url(raw)
             if u and MEDIA_HINT.search(u):
-                urls.add(u)
-    return sorted(urls)
+                all_urls.add(u)
+
+    return sorted(all_urls), target_meta, False
 
 def fraction(value):
     try:
@@ -173,6 +198,9 @@ def collect_diagnostics():
         "frida_probe_console_tail": [],
         "frida_server_log_tail": [],
         "app_cache_hits": [],
+        "target_scan": [],
+        "target_hits": [],
+        "target_snippets": [],
     }
 
     p = OUT / "window-after.xml"
@@ -207,6 +235,9 @@ def collect_diagnostics():
     if p.exists():
         hooks = []
         classes = []
+        target_scans = []
+        target_hits = []
+        target_snippets = []
         for line in p.read_text(errors="ignore").splitlines():
             try:
                 row = json.loads(line)
@@ -221,10 +252,37 @@ def collect_diagnostics():
                     })
                 elif payload.get("type") == "class_inventory":
                     classes.extend(payload.get("classes") or [])
+                elif payload.get("type") == "target_scan":
+                    target_scans.append({
+                        "targets": payload.get("targets"),
+                        "bytes_scanned": payload.get("bytes_scanned"),
+                        "target_hits": payload.get("target_hits"),
+                        "url_hits": payload.get("url_hits"),
+                        "keyword_hits": payload.get("keyword_hits"),
+                        "error": payload.get("error"),
+                    })
+                elif payload.get("type") == "target_hit":
+                    target_hits.append({
+                        "target": payload.get("target"),
+                        "encoding": payload.get("encoding"),
+                        "address": payload.get("address"),
+                        "range_size": payload.get("range_size"),
+                        "direct": payload.get("direct"),
+                    })
+                elif payload.get("type") == "target_snippet":
+                    target_snippets.append({
+                        "target": payload.get("target"),
+                        "keyword": payload.get("keyword"),
+                        "distance": payload.get("distance"),
+                        "snippet": payload.get("snippet"),
+                    })
             except Exception:
                 pass
         diagnostics["frida_hooks"] = hooks[:100]
         diagnostics["network_classes"] = sorted(set(classes))[:800]
+        diagnostics["target_scan"] = target_scans[-50:]
+        diagnostics["target_hits"] = target_hits[:100]
+        diagnostics["target_snippets"] = target_snippets[:250]
 
     for filename, key, limit in (
         ("native-bridge.txt", "native_bridge", 100),
@@ -270,18 +328,31 @@ def collect_diagnostics():
 
     return diagnostics
 
-urls = collect_urls()
+urls, target_meta, targeted = collect_urls()
 rows = []
 seen_public = set()
 for url in urls:
     row = summarize(url)
+    if url in target_meta:
+        row["target"] = target_meta[url].get("target")
+        row["target_distance"] = target_meta[url].get("distance")
     key = (row["url"], row.get("size"), row.get("codec"), row.get("fps"))
     if key in seen_public:
         continue
     seen_public.add(key)
     rows.append(row)
 
-rows.sort(key=lambda x: tuple(x.get("_rank") or [0, 0, 0, 0, 0]), reverse=True)
+if targeted:
+    rows.sort(key=lambda x: (
+        x.get("target_distance") if isinstance(x.get("target_distance"), (int, float)) else 1 << 60,
+        -((x.get("_rank") or [0])[0] or 0),
+        -((x.get("_rank") or [0, 0])[1] or 0),
+        -((x.get("_rank") or [0, 0, 0])[2] or 0),
+        -((x.get("_rank") or [0, 0, 0, 0])[3] or 0),
+        -((x.get("_rank") or [0, 0, 0, 0, 0])[4] or 0),
+    ))
+else:
+    rows.sort(key=lambda x: tuple(x.get("_rank") or [0, 0, 0, 0, 0]), reverse=True)
 for row in rows:
     row.pop("_rank", None)
 
@@ -290,6 +361,7 @@ result = {
     "run_id": os.environ.get("GITHUB_RUN_ID"),
     "commit": os.environ.get("GITHUB_SHA"),
     "candidate_count": len(rows),
+    "targeted": targeted,
     "best": rows[0] if rows else None,
     "candidates": rows,
     "diagnostics": collect_diagnostics(),
@@ -298,11 +370,17 @@ result = {
 OUT.mkdir(parents=True, exist_ok=True)
 (OUT / "media-probe.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-lines = ["# Kuaishou Android Probe", "", f"Candidates: {len(rows)}", ""]
+lines = [
+    "# Kuaishou Android Probe",
+    "",
+    f"Candidates: {len(rows)}",
+    f"Targeted memory candidates: {'yes' if targeted else 'no (fallback scan)'}",
+    "",
+]
 if rows:
     lines += [
-        "| # | Resolution | FPS | Codec | Bitrate | Size | Host | Path |",
-        "|---:|---|---:|---|---:|---:|---|---|",
+        "| # | Target distance | Resolution | FPS | Codec | Bitrate | Size | Host | Path |",
+        "|---:|---:|---|---:|---|---:|---:|---|---|",
     ]
     for i, r in enumerate(rows, 1):
         res = f"{r.get('width') or '?'}×{r.get('height') or '?'}"
@@ -310,7 +388,8 @@ if rows:
         br = r.get("video_bitrate") or r.get("format_bitrate") or ""
         size = r.get("size") or ""
         path = urllib.parse.urlsplit(r.get("url") or "").path
-        lines.append(f"| {i} | {res} | {fps} | {r.get('codec') or ''} | {br} | {size} | {r.get('host') or ''} | `{path}` |")
+        distance = r.get("target_distance") if targeted else ""
+        lines.append(f"| {i} | {distance} | {res} | {fps} | {r.get('codec') or ''} | {br} | {size} | {r.get('host') or ''} | `{path}` |")
 else:
     lines.append("No media candidates were captured.")
 (OUT / "media-probe.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
