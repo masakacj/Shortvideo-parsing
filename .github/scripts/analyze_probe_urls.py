@@ -38,7 +38,7 @@ def collect_urls():
             except Exception:
                 pass
 
-    for name in ("logcat.txt", "candidate-urls.txt"):
+    for name in ("logcat.txt", "candidate-urls.txt", "app-cache-strings.txt"):
         p = OUT / name
         if not p.exists():
             continue
@@ -167,6 +167,12 @@ def collect_diagnostics():
         "install_tail": [],
         "resolved_video_url": None,
         "deeplink_strings": [],
+        "native_work_deeplinks": [],
+        "frida_setup": [],
+        "frida_error": [],
+        "frida_probe_console_tail": [],
+        "frida_server_log_tail": [],
+        "app_cache_hits": [],
     }
 
     p = OUT / "window-after.xml"
@@ -223,12 +229,40 @@ def collect_diagnostics():
     for filename, key, limit in (
         ("native-bridge.txt", "native_bridge", 100),
         ("install.txt", "install_tail", 40),
-        ("deeplink-strings.txt", "deeplink_strings", 200),
+        ("native-work-deeplinks.txt", "native_work_deeplinks", 20),
+        ("frida-setup.txt", "frida_setup", 50),
+        ("frida-error.txt", "frida_error", 50),
+        ("frida-probe-console.txt", "frida_probe_console_tail", 120),
+        ("frida-server.log", "frida_server_log_tail", 120),
     ):
         p = OUT / filename
         if p.exists():
             lines = [x.strip() for x in p.read_text(errors="ignore").splitlines() if x.strip()]
-            diagnostics[key] = lines[-limit:] if key == "install_tail" else lines[:limit]
+            diagnostics[key] = lines[-limit:] if key in {
+                "install_tail", "frida_probe_console_tail", "frida_server_log_tail"
+            } else lines[:limit]
+
+    p = OUT / "deeplink-strings.txt"
+    if p.exists():
+        lines = [x.strip() for x in p.read_text(errors="ignore").splitlines() if x.strip()]
+        diagnostics["deeplink_strings"] = [
+            x for x in lines
+            if re.search(r"(photo|feed|slide|detail|work|video)", x, re.I)
+        ][:250]
+
+    p = OUT / "app-cache-strings.txt"
+    if p.exists():
+        lines = [x.strip() for x in p.read_text(errors="ignore").splitlines() if x.strip()]
+        diagnostics["app_cache_hits"] = [
+            x for x in lines
+            if re.search(
+                r"(5190398778855289322|3xtgkud72h4jz8e|https?://|\.mp4|\.m3u8|"
+                r"manifest|adaptation|representation|videoResource|photoUrl|1080|1440|2160|"
+                r"H265|HEVC|AVC|bitrate|kwaicdn|kwimgs|yximgs|ndcimgs|djvod|photo-video)",
+                x,
+                re.I,
+            )
+        ][:1000]
 
     p = OUT / "resolved-video-url.txt"
     if p.exists():

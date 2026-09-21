@@ -77,6 +77,37 @@ fi
 printf '%s\n' "$RESOLVED_VIDEO_URL" | tee artifacts/resolved-video-url.txt
 adb shell cmd package query-activities -a android.intent.action.VIEW -d "$RESOLVED_VIDEO_URL" > artifacts/url-handlers-resolved.txt 2>&1 || true
 
+readarray -t WORK_IDS < <(python3 - "$VIDEO_URL" "$RESOLVED_VIDEO_URL" <<'PY'
+import re, sys, urllib.parse
+original, resolved = sys.argv[1:3]
+token = ""
+numeric = ""
+m = re.search(r"/fw/photo/([^/?#]+)", resolved)
+if m:
+    token = m.group(1)
+q = urllib.parse.parse_qs(urllib.parse.urlsplit(resolved).query)
+numeric = (q.get("shareObjectId") or [""])[0]
+if not numeric:
+    m = re.search(r"/short-video/(\d+)", original)
+    if m:
+        numeric = m.group(1)
+print(token)
+print(numeric)
+PY
+)
+WORK_TOKEN="${WORK_IDS[0]:-}"
+WORK_NUMERIC="${WORK_IDS[1]:-}"
+{
+  [ -n "$WORK_TOKEN" ] && echo "kwai://work/$WORK_TOKEN"
+  [ -n "$WORK_NUMERIC" ] && echo "kwai://work/$WORK_NUMERIC"
+} | tee artifacts/native-work-deeplinks.txt
+for uri in "kwai://work/$WORK_TOKEN" "kwai://work/$WORK_NUMERIC"; do
+  case "$uri" in
+    "kwai://work/") continue ;;
+  esac
+  adb shell cmd package query-activities -a android.intent.action.VIEW -d "$uri" >> artifacts/url-handlers-native.txt 2>&1 || true
+done
+
 # Default/API emulator images are rootable. Frida is best-effort; the run still
 # produces logcat/UI artifacts if instrumentation is unavailable.
 adb root || true
@@ -144,22 +175,55 @@ if [ -n "$FRIDA_VER" ] && [ -n "$FRIDA_ARCH" ]; then
   adb shell chmod 755 /data/local/tmp/frida-server
   adb shell '/data/local/tmp/frida-server >/data/local/tmp/frida-server.log 2>&1 &' || true
   sleep 3
-  PACKAGE_NAME="$PACKAGE_NAME" VIDEO_URL="$VIDEO_URL" RESOLVED_VIDEO_URL="$RESOLVED_VIDEO_URL" PROBE_SECONDS="$PROBE_SECONDS" PROBE_OUT=artifacts python3 .github/scripts/frida_probe.py
-  FRIDA_RC=$?
+  set -o pipefail
+  PACKAGE_NAME="$PACKAGE_NAME" VIDEO_URL="$VIDEO_URL" RESOLVED_VIDEO_URL="$RESOLVED_VIDEO_URL" \
+    WORK_TOKEN="$WORK_TOKEN" WORK_NUMERIC="$WORK_NUMERIC" PROBE_SECONDS="$PROBE_SECONDS" PROBE_OUT=artifacts \
+    python3 .github/scripts/frida_probe.py 2>&1 | tee artifacts/frida-probe-console.txt
+  FRIDA_RC=${PIPESTATUS[0]}
+  set +o pipefail
+  adb shell cat /data/local/tmp/frida-server.log > artifacts/frida-server.log 2>&1 || true
 else
   FRIDA_RC=1
 fi
 set -e
 
 if [ "${FRIDA_RC:-1}" -ne 0 ]; then
-  echo "Frida probe unavailable; opening link without instrumentation." | tee artifacts/frida-error.txt
+  echo "Frida probe unavailable; opening all routes without instrumentation." | tee artifacts/frida-error.txt
   adb shell am start -a android.intent.action.VIEW -d "$VIDEO_URL" -p "$PACKAGE_NAME" || true
-  sleep 20
+  sleep 15
   if [ "$RESOLVED_VIDEO_URL" != "$VIDEO_URL" ]; then
     adb shell am start -a android.intent.action.VIEW -d "$RESOLVED_VIDEO_URL" -p "$PACKAGE_NAME" || true
+    sleep 15
   fi
-  sleep "$PROBE_SECONDS"
+  if [ -n "$WORK_TOKEN" ]; then
+    adb shell am start -a android.intent.action.VIEW -d "kwai://work/$WORK_TOKEN" -p "$PACKAGE_NAME" || true
+    sleep 15
+  fi
+  if [ -n "$WORK_NUMERIC" ]; then
+    adb shell am start -a android.intent.action.VIEW -d "kwai://work/$WORK_NUMERIC" -p "$PACKAGE_NAME" || true
+    sleep 15
+  fi
 fi
+
+echo "=== Scan fresh app data for media metadata ==="
+APP_ROOT="/data/user/0/$PACKAGE_NAME"
+adb shell "find '$APP_ROOT/cache' '$APP_ROOT/files' '$APP_ROOT/databases' -type f 2>/dev/null" \
+  | tr -d '\r' | head -400 > artifacts/app-data-files.txt || true
+: > artifacts/app-cache-strings.txt
+while IFS= read -r remote_file; do
+  [ -n "$remote_file" ] || continue
+  size=$(adb shell "stat -c %s '$remote_file' 2>/dev/null" | tr -d '\r' || true)
+  case "$size" in
+    ''|*[!0-9]*) continue ;;
+  esac
+  [ "$size" -le 33554432 ] || continue
+  {
+    echo "===== $remote_file ($size bytes) ====="
+    timeout 8s adb exec-out cat "$remote_file" 2>/dev/null | strings -n 6 | \
+      grep -aEi 'https?://|\.mp4|\.m3u8|manifest|adaptation(Set)?|representation|videoResource|photoUrl|H265|HEVC|AVC|1080|1440|2160|bitrate|kwaicdn|kwimgs|yximgs|ndcimgs|djvod|photo-video|5190398778855289322|3xtgkud72h4jz8e' \
+      | head -300 || true
+  } >> artifacts/app-cache-strings.txt
+done < artifacts/app-data-files.txt
 
 adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
 adb pull /sdcard/window.xml artifacts/window-after.xml >/dev/null 2>&1 || true

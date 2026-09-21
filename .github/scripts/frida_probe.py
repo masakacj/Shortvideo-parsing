@@ -11,6 +11,8 @@ import frida
 package = os.environ.get("PACKAGE_NAME", "com.smile.gifmaker")
 video_url = os.environ.get("VIDEO_URL", "https://v.kuaishou.com/7EsP76S3")
 resolved_video_url = os.environ.get("RESOLVED_VIDEO_URL", "").strip() or video_url
+work_token = os.environ.get("WORK_TOKEN", "").strip()
+work_numeric = os.environ.get("WORK_NUMERIC", "").strip()
 duration = int(os.environ.get("PROBE_SECONDS", "75"))
 out = Path(os.environ.get("PROBE_OUT", "artifacts"))
 out.mkdir(parents=True, exist_ok=True)
@@ -64,16 +66,27 @@ subprocess.run([
     "-p", package
 ], check=False)
 
-deadline = time.time() + duration
-first_observation = min(20, max(5, duration // 3))
-time.sleep(first_observation)
-
+routes = []
 if resolved_video_url != video_url:
-    print("Opening resolved URL:", resolved_video_url)
+    routes.append(("resolved", resolved_video_url))
+if work_token:
+    routes.append(("work-token", f"kwai://work/{work_token}"))
+if work_numeric:
+    routes.append(("work-numeric", f"kwai://work/{work_numeric}"))
+
+deadline = time.time() + duration
+segments = max(1, len(routes) + 1)
+segment_seconds = max(8, duration // segments)
+
+for label, route in routes:
+    time.sleep(min(segment_seconds, max(0, deadline - time.time())))
+    if time.time() >= deadline:
+        break
+    print(f"Opening {label} route:", route)
     subprocess.run([
         "adb", "shell", "am", "start",
         "-a", "android.intent.action.VIEW",
-        "-d", resolved_video_url,
+        "-d", route,
         "-p", package
     ], check=False)
 
