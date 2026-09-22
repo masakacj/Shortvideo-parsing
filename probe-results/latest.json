@@ -1,7 +1,7 @@
 {
   "source_url": "https://v.kuaishou.com/7EsP76S3",
-  "run_id": "35669540219",
-  "commit": "c6e2f40e83b8565e35b3b635853e9bb05d0f480e",
+  "run_id": "35671242073",
+  "commit": "b4662b3f409785aa03e344837ef7c5c4a23c8077",
   "candidate_count": 0,
   "targeted": false,
   "target_mode": "fallback",
@@ -9,9 +9,11 @@
   "candidates": [],
   "diagnostics": {
     "ui_texts": [
-      "Search"
+      "Pixel Launcher isn't responding",
+      "Close app",
+      "Wait"
     ],
-    "resumed_activity": "topResumedActivity=ActivityRecord{612e281 u0 com.smile.gifmaker/com.yxcorp.gifshow.detail.PhotoDetailActivity t8}",
+    "resumed_activity": "topResumedActivity=ActivityRecord{250e700 u0 com.smile.gifmaker/com.yxcorp.gifshow.detail.PhotoDetailActivity t8}",
     "frida_hooks": [],
     "network_classes": [],
     "native_bridge": [
@@ -158,12 +160,12 @@
     "frida_error": [],
     "frida_probe_console_tail": [
       "Starting: Intent { act=android.intent.action.VIEW dat=kwai://work/... pkg=com.smile.gifmaker }",
-      "Baseline media snapshot: {'label': 'baseline', 'total_urls': 0, 'new_urls': 0, 'bytes_scanned': 261627904}",
+      "Baseline media snapshot: {'label': 'baseline', 'total_urls': 0, 'new_urls': 0, 'bytes_scanned': 267210752}",
       "Opening isolated target route (work-token): kwai://work/3xtgkud72h4jz8e",
-      "Media snapshot target-5s: {'label': 'target-5s', 'total_urls': 0, 'new_urls': 0, 'bytes_scanned': 261627904}",
-      "Media snapshot target-15s: {'label': 'target-15s', 'total_urls': 0, 'new_urls': 0, 'bytes_scanned': 261627904}",
-      "Media snapshot target-30s: {'label': 'target-30s', 'total_urls': 0, 'new_urls': 0, 'bytes_scanned': 261627904}",
-      "Media snapshot target-50s: {'label': 'target-50s', 'total_urls': 0, 'new_urls': 0, 'bytes_scanned': 261627904}",
+      "Media snapshot target-5s: {'label': 'target-5s', 'total_urls': 0, 'new_urls': 0, 'bytes_scanned': 267210752}",
+      "Media snapshot target-15s: {'label': 'target-15s', 'total_urls': 0, 'new_urls': 0, 'bytes_scanned': 267210752}",
+      "Media snapshot target-30s: {'label': 'target-30s', 'total_urls': 0, 'new_urls': 0, 'bytes_scanned': 267210752}",
+      "Media snapshot target-50s: {'label': 'target-50s', 'total_urls': 0, 'new_urls': 0, 'bytes_scanned': 267210752}",
       "Frida probe complete: artifacts/frida.jsonl"
     ],
     "frida_server_log_tail": [],
@@ -176,31 +178,40 @@
         "label": "baseline",
         "total_urls": 0,
         "new_urls": 0,
-        "bytes_scanned": 261627904
+        "bytes_scanned": 267210752
       },
       {
         "label": "target-5s",
         "total_urls": 0,
         "new_urls": 0,
-        "bytes_scanned": 261627904
+        "bytes_scanned": 267210752
       },
       {
         "label": "target-15s",
         "total_urls": 0,
         "new_urls": 0,
-        "bytes_scanned": 261627904
+        "bytes_scanned": 267210752
       },
       {
         "label": "target-30s",
         "total_urls": 0,
         "new_urls": 0,
-        "bytes_scanned": 261627904
+        "bytes_scanned": 267210752
       },
       {
         "label": "target-50s",
         "total_urls": 0,
         "new_urls": 0,
-        "bytes_scanned": 261627904
+        "bytes_scanned": 267210752
+      }
+    ],
+    "cronet_requests": [],
+    "native_hooks": [
+      {
+        "name": "getaddrinfo",
+        "ok": true,
+        "address": null,
+        "error": null
       }
     ]
   }
