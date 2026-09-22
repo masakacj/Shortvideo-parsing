@@ -1,6 +1,6 @@
 # Kuaishou Android Probe
 
 Candidates: 0
-Targeted memory candidates: no (fallback scan)
+Target mode: fallback
 
 No media candidates were captured.

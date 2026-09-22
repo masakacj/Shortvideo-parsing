@@ -1,20 +1,17 @@
 {
   "source_url": "https://v.kuaishou.com/7EsP76S3",
-  "run_id": "35668709500",
-  "commit": "794b1ca4831cb1bbdffd215e156297e11442dfb8",
+  "run_id": "35669540219",
+  "commit": "c6e2f40e83b8565e35b3b635853e9bb05d0f480e",
   "candidate_count": 0,
   "targeted": false,
+  "target_mode": "fallback",
   "best": null,
   "candidates": [],
   "diagnostics": {
     "ui_texts": [
-      "Welcome to Kwai",
-      "Welcome to use Kuaishou App! Kuaishou is a comprehensive product that provides short videos, live broadcasts, shopping and other services.\nAccording to the \"Regulations on the Scope of Necessary Personal Information for Common Types of Mobile Internet Applications\", Kuaishou is a short video APP that provides you with short video services for video search and playback that do not exceed a certain length of time.\nYou agree that the privacy policy only represents your awareness and consent to the processing of necessary personal information when using basic functions. This does not imply your consent to the processing of personal information for other extended features. For any other extended features that require the collection of personal information, we will seek your consent when you use those specific features.\nIf you have read and agreed to Kuaishou basic functional privacy policy, please click \"Agree\" to start using our products and services! If you do not agree with Kuaishou basic functional privacy policy, you can click \"Disagree\" to enter guest mode. Welcome to check out Privacy Policy Summary, Permission list, and Third -party SDK list for more details.",
-      "Agree and continue",
-      "disagree",
       "Search"
     ],
-    "resumed_activity": "topResumedActivity=ActivityRecord{eb9a8f4 u0 com.smile.gifmaker/com.yxcorp.gifshow.detail.PhotoDetailActivity t8}",
+    "resumed_activity": "topResumedActivity=ActivityRecord{612e281 u0 com.smile.gifmaker/com.yxcorp.gifshow.detail.PhotoDetailActivity t8}",
     "frida_hooks": [],
     "network_classes": [],
     "native_bridge": [
@@ -160,59 +157,51 @@
     ],
     "frida_error": [],
     "frida_probe_console_tail": [
-      "Starting: Intent { act=android.intent.action.VIEW dat=https://v.kuaishou.com/... pkg=com.smile.gifmaker }",
-      "Error: Activity not started, unable to resolve Intent { act=android.intent.action.VIEW dat=https://v.kuaishou.com/... flg=0x10000000 pkg=com.smile.gifmaker }",
-      "/system/bin/sh: -p: inaccessible or not found",
-      "Starting: Intent { act=android.intent.action.VIEW dat=https://v.m.chenzhongtech.com/... }",
       "Starting: Intent { act=android.intent.action.VIEW dat=kwai://work/... pkg=com.smile.gifmaker }",
-      "Starting: Intent { act=android.intent.action.VIEW dat=kwai://work/... pkg=com.smile.gifmaker }",
-      "Target memory probe configured: ['5190398778855289322', '3xtgkud72h4jz8e']",
-      "Opening resolved route: https://v.m.chenzhongtech.com/fw/photo/3xtgkud72h4jz8e?cc=share_copylink&followRefer=151&shareMethod=TOKEN&docId=9&kpn=KUAISHOU&subBiz=BROWSE_SLIDE_PHOTO&photoId=3xtgkud72h4jz8e&shareId=19120284195040&shareToken=X-8BzsJjGk7x21Ew&shareResourceType=PHOTO_OTHER&userId=3x8vq2dqt5btf72&shareType=1&et=1_i%2F2006302341053236162_bs6502&shareMode=APP&efid=3x6myx5gx5p78ga&originShareId=19120284195040&appType=1&shareObjectId=5190398778855289322&shareUrlOpened=0&timestamp=1789973142380",
-      "Target rescan configure failed: script has been destroyed",
-      "Opening work-token route: kwai://work/3xtgkud72h4jz8e",
-      "Target rescan configure failed: script has been destroyed",
-      "Opening work-numeric route: kwai://work/5190398778855289322",
-      "Target rescan configure failed: script has been destroyed",
+      "Baseline media snapshot: {'label': 'baseline', 'total_urls': 0, 'new_urls': 0, 'bytes_scanned': 261627904}",
+      "Opening isolated target route (work-token): kwai://work/3xtgkud72h4jz8e",
+      "Media snapshot target-5s: {'label': 'target-5s', 'total_urls': 0, 'new_urls': 0, 'bytes_scanned': 261627904}",
+      "Media snapshot target-15s: {'label': 'target-15s', 'total_urls': 0, 'new_urls': 0, 'bytes_scanned': 261627904}",
+      "Media snapshot target-30s: {'label': 'target-30s', 'total_urls': 0, 'new_urls': 0, 'bytes_scanned': 261627904}",
+      "Media snapshot target-50s: {'label': 'target-50s', 'total_urls': 0, 'new_urls': 0, 'bytes_scanned': 261627904}",
       "Frida probe complete: artifacts/frida.jsonl"
     ],
     "frida_server_log_tail": [],
     "app_cache_hits": [],
-    "target_scan": [
-      {
-        "targets": [
-          "5190398778855289322",
-          "3xtgkud72h4jz8e"
-        ],
-        "bytes_scanned": 551342080,
-        "target_hits": 0,
-        "url_hits": 0,
-        "keyword_hits": 0,
-        "error": null
-      },
-      {
-        "targets": [
-          "5190398778855289322",
-          "3xtgkud72h4jz8e"
-        ],
-        "bytes_scanned": 551342080,
-        "target_hits": 0,
-        "url_hits": 0,
-        "keyword_hits": 0,
-        "error": null
-      },
-      {
-        "targets": [
-          "5190398778855289322",
-          "3xtgkud72h4jz8e"
-        ],
-        "bytes_scanned": 551342080,
-        "target_hits": 0,
-        "url_hits": 0,
-        "keyword_hits": 0,
-        "error": null
-      }
-    ],
+    "target_scan": [],
     "target_hits": [],
-    "target_snippets": []
+    "target_snippets": [],
+    "snapshots": [
+      {
+        "label": "baseline",
+        "total_urls": 0,
+        "new_urls": 0,
+        "bytes_scanned": 261627904
+      },
+      {
+        "label": "target-5s",
+        "total_urls": 0,
+        "new_urls": 0,
+        "bytes_scanned": 261627904
+      },
+      {
+        "label": "target-15s",
+        "total_urls": 0,
+        "new_urls": 0,
+        "bytes_scanned": 261627904
+      },
+      {
+        "label": "target-30s",
+        "total_urls": 0,
+        "new_urls": 0,
+        "bytes_scanned": 261627904
+      },
+      {
+        "label": "target-50s",
+        "total_urls": 0,
+        "new_urls": 0,
+        "bytes_scanned": 261627904
+      }
+    ]
   }
 }
