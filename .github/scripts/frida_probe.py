@@ -62,6 +62,11 @@ except Exception:
 time.sleep(5)
 
 try:
+    script.exports_sync.mark("baseline")
+except Exception as exc:
+    print("Baseline phase mark failed:", exc)
+
+try:
     baseline = script.exports_sync.snapshot("baseline")
     print("Baseline media snapshot:", baseline)
 except Exception as exc:
@@ -79,6 +84,11 @@ elif resolved_video_url:
 else:
     target_label = "share"
     target_route = video_url
+
+try:
+    script.exports_sync.mark("target")
+except Exception as exc:
+    print("Target phase mark failed:", exc)
 
 print(f"Opening isolated target route ({target_label}):", target_route)
 subprocess.run([

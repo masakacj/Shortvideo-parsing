@@ -4,6 +4,10 @@ const seen = Object.create(null);
 let targetIds = [];
 let scanTimer = null;
 let snapshotBaseline = Object.create(null);
+let currentPhase = "baseline";
+let cronetHooked = false;
+let cronetHookTimer = null;
+const cronetMethods = Object.create(null);
 
 function sendOnce(type, key, payload) {
   const id = type + "\n" + key;
@@ -27,7 +31,26 @@ function report(kind, value, extra) {
   const url = normalizeUrl(value);
   if (!url || !looksInteresting(url)) return;
   const payload = Object.assign({ kind: kind, url: url }, extra || {});
-  sendOnce("url", kind + "\n" + (payload.target || "") + "\n" + url, payload);
+  const scope = payload.phase || payload.snapshot || payload.target || "";
+  sendOnce("url", kind + "\n" + scope + "\n" + url, payload);
+}
+
+function reportRequest(kind, value, extra) {
+  const url = normalizeUrl(value);
+  if (!url) return;
+  const payload = Object.assign({
+    kind: kind,
+    url: url,
+    phase: currentPhase
+  }, extra || {});
+  sendOnce(
+    "request_url",
+    kind + "\n" + payload.phase + "\n" + url,
+    payload
+  );
+  if (looksInteresting(url)) {
+    report("cronet-media", url, { phase: payload.phase, method: payload.method || null });
+  }
 }
 
 function safeUse(name, fn) {
@@ -178,6 +201,83 @@ function stringPattern(value, utf16) {
     if (utf16) bytes.push("00");
   }
   return bytes.join(" ");
+}
+
+function executableTargetFromDataExport(name) {
+  try {
+    const slot = Module.findGlobalExportByName(name);
+    if (!slot) return null;
+
+    try {
+      const candidate = slot.readPointer();
+      if (!candidate.isNull()) {
+        const range = Process.findRangeByAddress(candidate);
+        if (range && range.protection.indexOf("x") !== -1) {
+          return candidate;
+        }
+      }
+    } catch (_) {}
+
+    const slotRange = Process.findRangeByAddress(slot);
+    if (slotRange && slotRange.protection.indexOf("x") !== -1) {
+      return slot;
+    }
+  } catch (_) {}
+  return null;
+}
+
+function installCronetHooks() {
+  if (cronetHooked) return true;
+
+  const initTarget = executableTargetFromDataExport("Cronet_UrlRequest_InitWithParams");
+  if (!initTarget) return false;
+
+  try {
+    const methodTarget = executableTargetFromDataExport("Cronet_UrlRequestParams_http_method_set");
+    if (methodTarget) {
+      Interceptor.attach(methodTarget, {
+        onEnter(args) {
+          const paramsKey = String(args[0]);
+          const method = safeReadUtf8(args[1], 64);
+          if (method) cronetMethods[paramsKey] = method;
+        }
+      });
+    }
+
+    Interceptor.attach(initTarget, {
+      onEnter(args) {
+        const url = safeReadUtf8(args[2], 8192);
+        if (!url) return;
+        const paramsKey = String(args[3]);
+        reportRequest("Cronet_UrlRequest_InitWithParams", url, {
+          method: cronetMethods[paramsKey] || null
+        });
+      }
+    });
+
+    cronetHooked = true;
+    send({
+      type: "native_hook",
+      name: "Cronet_UrlRequest_InitWithParams",
+      ok: true,
+      address: String(initTarget),
+      ts: Date.now()
+    });
+    if (cronetHookTimer !== null) {
+      clearInterval(cronetHookTimer);
+      cronetHookTimer = null;
+    }
+    return true;
+  } catch (e) {
+    send({
+      type: "native_hook",
+      name: "Cronet_UrlRequest_InitWithParams",
+      ok: false,
+      error: String(e),
+      ts: Date.now()
+    });
+    return false;
+  }
 }
 
 function installGetaddrinfoHook() {
@@ -444,9 +544,20 @@ function nativeInit() {
   }
 
   installGetaddrinfoHook();
+  if (!installCronetHooks()) {
+    cronetHookTimer = setInterval(function () {
+      installCronetHooks();
+    }, 1000);
+  }
 }
 
 rpc.exports = {
+  mark: function (phase) {
+    currentPhase = String(phase || "target");
+    send({ type: "phase", phase: currentPhase, ts: Date.now() });
+    installCronetHooks();
+    return currentPhase;
+  },
   snapshot: function (label) {
     return temporalSnapshot(String(label || "snapshot"));
   },

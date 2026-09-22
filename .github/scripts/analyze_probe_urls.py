@@ -27,8 +27,10 @@ def collect_urls():
     all_urls = set()
     target_urls = set()
     delta_urls = set()
+    cronet_target_urls = set()
     target_meta = {}
     delta_meta = {}
+    cronet_meta = {}
 
     p = OUT / "frida.jsonl"
     if p.exists():
@@ -71,8 +73,20 @@ def collect_urls():
                             "snapshot": label,
                             "snapshot_order": order,
                         }
+                elif payload.get("kind") == "cronet-media" and payload.get("phase") == "target":
+                    cronet_target_urls.add(u)
+                    cronet_meta[u] = {
+                        "phase": "target",
+                        "method": payload.get("method"),
+                    }
             except Exception:
                 pass
+
+    if cronet_target_urls:
+        (OUT / "target-candidate-urls.txt").write_text(
+            "\n".join(sorted(cronet_target_urls)) + "\n", encoding="utf-8"
+        )
+        return sorted(cronet_target_urls), cronet_meta, True, "cronet-target"
 
     if target_urls:
         (OUT / "target-candidate-urls.txt").write_text(
@@ -226,6 +240,8 @@ def collect_diagnostics():
         "target_hits": [],
         "target_snippets": [],
         "snapshots": [],
+        "cronet_requests": [],
+        "native_hooks": [],
     }
 
     p = OUT / "window-after.xml"
@@ -264,6 +280,8 @@ def collect_diagnostics():
         target_hits = []
         target_snippets = []
         snapshots = []
+        cronet_requests = []
+        native_hooks = []
         for line in p.read_text(errors="ignore").splitlines():
             try:
                 row = json.loads(line)
@@ -276,6 +294,25 @@ def collect_diagnostics():
                         "ok": payload.get("ok"),
                         "error": payload.get("error"),
                     })
+                elif payload.get("type") == "native_hook":
+                    native_hooks.append({
+                        "name": payload.get("name"),
+                        "ok": payload.get("ok"),
+                        "address": payload.get("address"),
+                        "error": payload.get("error"),
+                    })
+                elif payload.get("type") == "request_url":
+                    raw_url = clean_url(payload.get("url"))
+                    if raw_url:
+                        parsed = urllib.parse.urlsplit(raw_url)
+                        safe_url = urllib.parse.urlunsplit(
+                            (parsed.scheme, parsed.netloc, parsed.path, "", "")
+                        )
+                        cronet_requests.append({
+                            "phase": payload.get("phase"),
+                            "method": payload.get("method"),
+                            "url": safe_url,
+                        })
                 elif payload.get("type") == "class_inventory":
                     classes.extend(payload.get("classes") or [])
                 elif payload.get("type") == "target_scan":
@@ -317,6 +354,8 @@ def collect_diagnostics():
         diagnostics["target_hits"] = target_hits[:100]
         diagnostics["target_snippets"] = target_snippets[:250]
         diagnostics["snapshots"] = snapshots[-50:]
+        diagnostics["cronet_requests"] = cronet_requests[-500:]
+        diagnostics["native_hooks"] = native_hooks[-100:]
 
     for filename, key, limit in (
         ("native-bridge.txt", "native_bridge", 100),
@@ -380,13 +419,17 @@ for url in urls:
         row["target_distance"] = target_meta[url].get("distance")
         row["snapshot"] = target_meta[url].get("snapshot")
         row["snapshot_order"] = target_meta[url].get("snapshot_order")
+        row["phase"] = target_meta[url].get("phase")
+        row["method"] = target_meta[url].get("method")
     key = (row["url"], row.get("size"), row.get("codec"), row.get("fps"))
     if key in seen_public:
         continue
     seen_public.add(key)
     rows.append(row)
 
-if target_mode == "temporal-delta":
+if target_mode == "cronet-target":
+    rows.sort(key=lambda x: tuple(x.get("_rank") or [0, 0, 0, 0, 0]), reverse=True)
+elif target_mode == "temporal-delta":
     rows.sort(key=lambda x: (
         x.get("snapshot_order") if isinstance(x.get("snapshot_order"), (int, float)) else 999,
         -((x.get("_rank") or [0])[0] or 0),
@@ -442,7 +485,12 @@ if rows:
         br = r.get("video_bitrate") or r.get("format_bitrate") or ""
         size = r.get("size") or ""
         path = urllib.parse.urlsplit(r.get("url") or "").path
-        distance = r.get("target_distance") if target_mode == "id-neighborhood" else r.get("snapshot") if target_mode == "temporal-delta" else ""
+        distance = (
+            r.get("target_distance") if target_mode == "id-neighborhood"
+            else r.get("snapshot") if target_mode == "temporal-delta"
+            else r.get("phase") if target_mode == "cronet-target"
+            else ""
+        )
         lines.append(f"| {i} | {distance} | {res} | {fps} | {r.get('codec') or ''} | {br} | {size} | {r.get('host') or ''} | `{path}` |")
 else:
     lines.append("No media candidates were captured.")
