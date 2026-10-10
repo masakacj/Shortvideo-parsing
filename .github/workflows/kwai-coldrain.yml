@@ -1,0 +1,32 @@
+name: Build Kwai ColdRain Bridge
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/kwai-coldrain-api-bridge
+    paths:
+      - 'ios/KwaiColdRainBridge/**'
+      - '.github/workflows/kwai-coldrain.yml'
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build iOS arm64 dylib
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          mkdir -p dist
+          xcrun --sdk iphoneos clang -x objective-c -fobjc-arc -fblocks -O2 -Wall \
+            -arch arm64 -miphoneos-version-min=14.0 -isysroot "$SDK" \
+            -dynamiclib -install_name '@rpath/KwaiInterfaceBridge.dylib' \
+            -framework Foundation -framework UIKit -framework Photos \
+            ios/KwaiColdRainBridge/KwaiInterfaceBridge.m \
+            -o dist/KwaiInterfaceBridge.dylib
+          file dist/KwaiInterfaceBridge.dylib
+          shasum -a 256 dist/KwaiInterfaceBridge.dylib > dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KwaiInterfaceBridge-arm64
+          path: dist/*
