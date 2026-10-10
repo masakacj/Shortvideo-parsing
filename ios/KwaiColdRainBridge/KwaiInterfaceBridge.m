@@ -187,6 +187,49 @@ static void KConfigurePanel(id self, SEL cmd) {
 @implementation KBridgeAction
 + (void)openSettings:(id)sender { KConfigure(); }
 @end
+
+/*
+ * ColdRain save fallback:
+ * NSURLSession's didFinishDownloadingToURL: location is ephemeral.
+ * Copy it BEFORE forwarding to the original handler, then use Photos' modern
+ * transaction API. This is independent of quality-model and network logic.
+ * The original handler remains active for progress/UI compatibility.
+ */
+static void (*KOriginalColdRainFinished)(id, SEL, NSURLSession *, NSURLSessionDownloadTask *, NSURL *);
+static void KColdRainFinished(id self, SEL cmd, NSURLSession *session, NSURLSessionDownloadTask *task, NSURL *location) {
+    NSURL *backup = nil;
+    NSError *copyError = nil;
+    if (location.isFileURL) {
+        NSString *extension = task.response.suggestedFilename.pathExtension.lowercaseString;
+        if (![@[@"mov",@"mp4",@"m4v"] containsObject:extension]) extension = @"mp4";
+        backup = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:
+                 [NSString stringWithFormat:@"kwai-coldrain-%@.%@", NSUUID.UUID.UUIDString, extension]]];
+        if (![[NSFileManager defaultManager] copyItemAtURL:location toURL:backup error:&copyError]) backup = nil;
+    }
+    if (KOriginalColdRainFinished) KOriginalColdRainFinished(self, cmd, session, task, location);
+    if (!backup) {
+        NSLog(@"[KwaiBridge] ColdRain fallback skipped: %@", copyError.localizedDescription ?: @"missing temporary file");
+        return;
+    }
+    NSURL *savedFile = backup;
+    [PHPhotoLibrary requestAuthorizationForAccessLevel:PHAccessLevelAddOnly handler:^(PHAuthorizationStatus status) {
+        if (status != PHAuthorizationStatusAuthorized && status != PHAuthorizationStatusLimited) {
+            [[NSFileManager defaultManager] removeItemAtURL:savedFile error:nil];
+            KAlert(@"相册保存失败", @"没有相册写入权限，请在系统设置中允许快手添加照片。");
+            return;
+        }
+        [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+            PHAssetCreationRequest *request = [PHAssetCreationRequest creationRequestForAsset];
+            [request addResourceWithType:PHAssetResourceTypeVideo fileURL:savedFile options:nil];
+        } completionHandler:^(BOOL success, NSError *error) {
+            [[NSFileManager defaultManager] removeItemAtURL:savedFile error:nil];
+            NSLog(@"[KwaiBridge] ColdRain Photos save: %@ %@",success ? @"ok" : @"failed",error ?: @"");
+            if (success) KAlert(@"相册保存成功", @"冷冷雨视频已写入系统相册。");
+            else KAlert(@"相册保存失败", error.localizedDescription ?: @"系统照片库拒绝写入视频。");
+        }];
+    }];
+}
+
 static void KSwizzle(Class cls, SEL sel, IMP replacement, IMP *old) {
     if (!cls) return;
     Method m = class_getInstanceMethod(cls, sel); if (!m) return;
@@ -198,5 +241,6 @@ __attribute__((constructor)) static void KStart(void) {
         KSwizzle(UIViewController.class, @selector(presentViewController:animated:completion:), (IMP)KPresent, (IMP *)&KOriginalPresent);
         Class menu = NSClassFromString(@"HalfMenuView");
         if (menu) KSwizzle(menu, @selector(configureUI), (IMP)KConfigurePanel, (IMP *)&KOriginalConfigure);
+        KSwizzle(NSClassFromString(@"DownloaderManager"), @selector(URLSession:downloadTask:didFinishDownloadingToURL:), (IMP)KColdRainFinished, (IMP *)&KOriginalColdRainFinished);
     });
 }
