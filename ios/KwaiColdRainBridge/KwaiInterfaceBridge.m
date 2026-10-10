@@ -1,5 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <Photos/Photos.h>
+#import <AVFoundation/AVFoundation.h>
+#import <string.h>
 #import <objc/runtime.h>
 
 static NSString *const KURLKey = @"CJ.KwaiBridge.Endpoint";
@@ -196,38 +198,202 @@ static void KConfigurePanel(id self, SEL cmd) {
  * The original handler remains active for progress/UI compatibility.
  */
 static void (*KOriginalColdRainFinished)(id, SEL, NSURLSession *, NSURLSessionDownloadTask *, NSURL *);
+/* Diagnose the downloaded bytes, never guess that an arbitrary payload is MP4. */
+static NSString *KColdRainMediaType(NSURL *source) {
+    NSFileHandle *handle = [NSFileHandle fileHandleForReadingAtPath:source.path];
+    NSData *head = [handle readDataOfLength:512];
+    [handle closeFile];
+    const unsigned char *b = head.bytes;
+    NSUInteger n = head.length;
+    if (n < 12) return @"invalid";
+    if (memcmp(b + 4, "ftyp", 4) == 0) {
+        if (n >= 12 && memcmp(b + 8, "qt  ", 4) == 0) return @"mov";
+        return @"mp4";
+    }
+    if (memcmp(b + 4, "moov", 4) == 0 || memcmp(b + 4, "mdat", 4) == 0 ||
+        memcmp(b + 4, "wide", 4) == 0) return @"mov";
+    if (memcmp(b, "FLV", 3) == 0) return @"flv";
+    if (b[0] == 0x1a && b[1] == 0x45 && b[2] == 0xdf && b[3] == 0xa3) return @"webm";
+    if (n > 190 && b[0] == 0x47 && b[188] == 0x47) return @"ts";
+    if (memcmp(b, "#EXTM3U", 7) == 0) return @"m3u8";
+    if (b[0] == '{' || b[0] == '[' || b[0] == '<') return @"text";
+    if (memcmp(b, "ID3", 3) == 0) return @"audio";
+    return @"unknown";
+}
+static NSError *KColdRainError(NSString *reason) {
+    return [NSError errorWithDomain:@"KwaiColdRainBridge" code:1
+                           userInfo:@{NSLocalizedDescriptionKey:reason ?: @"未知文件错误"}];
+}
+static void KColdRainCleanup(NSURL *file) {
+    if (file) [[NSFileManager defaultManager] removeItemAtURL:file error:nil];
+}
+/* Keep an inaccessible/unrecognized file available for export through the share sheet. */
+static void KColdRainFailure(NSURL *source, NSString *info, NSString *problem) {
+    NSLog(@"[KwaiBridge] Photos save failed: %@, %@", info, problem);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *vc = KTop();
+        if (!vc) { KColdRainCleanup(source); return; }
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"冷冷雨视频保存失败"
+           message:[NSString stringWithFormat:@"%@\n%@\n可以尝试导出原文件。", info, problem ?: @"未知错误"]
+           preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"分享原文件" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+            UIViewController *presenter = KTop();
+            if (!presenter) { KColdRainCleanup(source); return; }
+            UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[source] applicationActivities:nil];
+            share.popoverPresentationController.sourceView = presenter.view;
+            share.popoverPresentationController.sourceRect =
+                CGRectMake(CGRectGetMidX(presenter.view.bounds), CGRectGetMidY(presenter.view.bounds), 1, 1);
+            share.completionWithItemsHandler = ^(__unused UIActivityType activity,
+                                                  __unused BOOL completed,
+                                                  __unused NSArray *returnedItems,
+                                                  __unused NSError *error) {
+                KColdRainCleanup(source);
+            };
+            [presenter presentViewController:share animated:YES completion:nil];
+        }]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction *a) {
+            KColdRainCleanup(source);
+        }]];
+        [vc presentViewController:alert animated:YES completion:nil];
+    });
+}
+static void KColdRainImport(NSURL *file, void (^done)(BOOL, NSError *)) {
+    [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+        [PHAssetChangeRequest creationRequestForAssetFromVideoAtFileURL:file];
+    } completionHandler:^(BOOL success, NSError *error) {
+        done(success, error);
+    }];
+}
+/* Apple may support container remux (passthrough) with zero video-quality loss.
+   Only if Photos also rejects the remux do we try HighestQuality re-encoding. */
+static void KColdRainExport(NSURL *source, NSString *preset,
+                            void (^done)(NSURL *, NSError *)) {
+    AVURLAsset *asset = [AVURLAsset URLAssetWithURL:source options:nil];
+    [asset loadValuesAsynchronouslyForKeys:@[@"tracks"] completionHandler:^{
+        NSError *error = nil;
+        if ([asset statusOfValueForKey:@"tracks" error:&error] != AVKeyValueStatusLoaded) {
+            done(nil, error ?: KColdRainError(@"AVFoundation 无法识别视频文件"));
+            return;
+        }
+        if ([asset tracksWithMediaType:AVMediaTypeVideo].count == 0) {
+            done(nil, KColdRainError(@"文件中没有可读取的视频轨道"));
+            return;
+        }
+        AVAssetExportSession *session = [[AVAssetExportSession alloc] initWithAsset:asset presetName:preset];
+        if (!session) {
+            done(nil, KColdRainError(@"系统不支持此视频的导出格式"));
+            return;
+        }
+        AVFileType outputType = nil;
+        NSString *extension = nil;
+        if ([session.supportedFileTypes containsObject:AVFileTypeMPEG4]) {
+            outputType = AVFileTypeMPEG4;
+            extension = @"mp4";
+        } else if ([session.supportedFileTypes containsObject:AVFileTypeQuickTimeMovie]) {
+            outputType = AVFileTypeQuickTimeMovie;
+            extension = @"mov";
+        } else {
+            done(nil, KColdRainError(@"系统无法将这个视频封装为 MP4 或 MOV"));
+            return;
+        }
+        NSURL *output = [NSURL fileURLWithPath:
+             [NSTemporaryDirectory() stringByAppendingPathComponent:
+                [NSString stringWithFormat:@"kwai-repacked-%@.%@", NSUUID.UUID.UUIDString, extension]]];
+        session.outputURL = output;
+        session.outputFileType = outputType;
+        session.shouldOptimizeForNetworkUse = YES;
+        [session exportAsynchronouslyWithCompletionHandler:^{
+            if (session.status == AVAssetExportSessionStatusCompleted) {
+                done(output, nil);
+            } else {
+                KColdRainCleanup(output);
+                done(nil, session.error ?: KColdRainError(@"视频导出失败"));
+            }
+        }];
+    }];
+}
+static void KColdRainReencode(NSURL *original, NSString *info, NSError *priorError) {
+    KColdRainExport(original, AVAssetExportPresetHighestQuality, ^(NSURL *converted, NSError *exportError) {
+        if (!converted) {
+            KColdRainFailure(original, info, [NSString stringWithFormat:@"保存失败：%@；转换失败：%@",
+                priorError.localizedDescription ?: @"3302",
+                exportError.localizedDescription ?: @"未知原因"]);
+            return;
+        }
+        KColdRainImport(converted, ^(BOOL saved, NSError *saveError) {
+            KColdRainCleanup(converted);
+            if (saved) {
+                KColdRainCleanup(original);
+                KAlert(@"相册保存成功", @"视频已通过兼容转换写入相册；这一备用方式可能重新编码。");
+            } else {
+                KColdRainFailure(original, info, [NSString stringWithFormat:@"兼容转换后仍无法保存：%@",
+                    saveError.localizedDescription ?: @"未知原因"]);
+            }
+        });
+    });
+}
+static void KColdRainRemux(NSURL *original, NSString *info, NSError *priorError) {
+    KColdRainExport(original, AVAssetExportPresetPassthrough, ^(NSURL *repacked, NSError *exportError) {
+        if (!repacked) {
+            KColdRainReencode(original, info, exportError ?: priorError);
+            return;
+        }
+        KColdRainImport(repacked, ^(BOOL saved, NSError *saveError) {
+            KColdRainCleanup(repacked);
+            if (saved) {
+                KColdRainCleanup(original);
+                KAlert(@"相册保存成功", @"视频已无损重新封装并写入相册（未重新编码）。");
+            } else {
+                KColdRainReencode(original, info, saveError ?: priorError);
+            }
+        });
+    });
+}
+static void KColdRainSaveToPhotos(NSURL *original, NSString *info) {
+    [PHPhotoLibrary requestAuthorizationForAccessLevel:PHAccessLevelAddOnly handler:^(PHAuthorizationStatus status) {
+        if (status != PHAuthorizationStatusAuthorized && status != PHAuthorizationStatusLimited) {
+            KColdRainFailure(original, info, @"没有相册写入权限，请在系统设置允许快手添加照片。");
+            return;
+        }
+        KColdRainImport(original, ^(BOOL saved, NSError *error) {
+            if (saved) {
+                KColdRainCleanup(original);
+                KAlert(@"相册保存成功", @"已确认 PhotoKit 写入成功。");
+                return;
+            }
+            NSLog(@"[KwaiBridge] direct Photos import failed: %@", error);
+            if ([error.domain isEqualToString:PHPhotosErrorDomain] && error.code == 3302) {
+                KColdRainRemux(original, info, error);
+            } else {
+                KColdRainFailure(original, info, error.localizedDescription ?: @"PhotoKit 未能写入相册");
+            }
+        });
+    }];
+}
 static void KColdRainFinished(id self, SEL cmd, NSURLSession *session, NSURLSessionDownloadTask *task, NSURL *location) {
     NSURL *backup = nil;
     NSError *copyError = nil;
-    if (location.isFileURL) {
-        NSString *extension = task.response.suggestedFilename.pathExtension.lowercaseString;
-        if (![@[@"mov",@"mp4",@"m4v"] containsObject:extension]) extension = @"mp4";
+    NSHTTPURLResponse *response = [task.response isKindOfClass:NSHTTPURLResponse.class] ? (NSHTTPURLResponse *)task.response : nil;
+    NSString *kind = location.isFileURL ? KColdRainMediaType(location) : @"missing";
+    unsigned long long bytes = [[[NSFileManager defaultManager] attributesOfItemAtPath:location.path error:nil] fileSize];
+    NSInteger code = response ? response.statusCode : 0;
+    NSString *mime = task.response.MIMEType ?: @"unknown";
+    NSString *info = [NSString stringWithFormat:@"格式 %@ · %.2f MB · HTTP %ld · %@",
+                      kind, bytes / 1048576.0, (long)code, mime];
+    BOOL validBody = bytes > 1024 && (code == 0 || (code >= 200 && code < 300))
+                     && ![@[@"invalid", @"text", @"audio", @"m3u8", @"missing"] containsObject:kind];
+    if (validBody) {
         backup = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:
-                 [NSString stringWithFormat:@"kwai-coldrain-%@.%@", NSUUID.UUID.UUIDString, extension]]];
+             [NSString stringWithFormat:@"kwai-coldrain-%@.%@",
+                NSUUID.UUID.UUIDString, [kind isEqualToString:@"unknown"] ? @"bin" : kind]]];
         if (![[NSFileManager defaultManager] copyItemAtURL:location toURL:backup error:&copyError]) backup = nil;
     }
+    /* Always preserve the original plugin's own download behavior. */
     if (KOriginalColdRainFinished) KOriginalColdRainFinished(self, cmd, session, task, location);
-    if (!backup) {
-        NSLog(@"[KwaiBridge] ColdRain fallback skipped: %@", copyError.localizedDescription ?: @"missing temporary file");
-        return;
-    }
-    NSURL *savedFile = backup;
-    [PHPhotoLibrary requestAuthorizationForAccessLevel:PHAccessLevelAddOnly handler:^(PHAuthorizationStatus status) {
-        if (status != PHAuthorizationStatusAuthorized && status != PHAuthorizationStatusLimited) {
-            [[NSFileManager defaultManager] removeItemAtURL:savedFile error:nil];
-            KAlert(@"相册保存失败", @"没有相册写入权限，请在系统设置中允许快手添加照片。");
-            return;
-        }
-        [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
-            PHAssetCreationRequest *request = [PHAssetCreationRequest creationRequestForAsset];
-            [request addResourceWithType:PHAssetResourceTypeVideo fileURL:savedFile options:nil];
-        } completionHandler:^(BOOL success, NSError *error) {
-            [[NSFileManager defaultManager] removeItemAtURL:savedFile error:nil];
-            NSLog(@"[KwaiBridge] ColdRain Photos save: %@ %@",success ? @"ok" : @"failed",error ?: @"");
-            if (success) KAlert(@"相册保存成功", @"冷冷雨视频已写入系统相册。");
-            else KAlert(@"相册保存失败", error.localizedDescription ?: @"系统照片库拒绝写入视频。");
-        }];
-    }];
+    NSLog(@"[KwaiBridge] ColdRain download finished: %@, copied=%d", info, backup != nil);
+    if (backup) KColdRainSaveToPhotos(backup, info);
+    else if (copyError) KAlert(@"冷冷雨相册修复失败", copyError.localizedDescription);
+    else KAlert(@"下载文件不是有效视频", [info stringByAppendingString:@"\n可能是接口返回的错误页面或播放清单，已跳过相册导入。"]);
 }
 
 static void KSwizzle(Class cls, SEL sel, IMP replacement, IMP *old) {
