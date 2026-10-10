@@ -21,7 +21,7 @@ jobs:
           xcrun --sdk iphoneos clang -x objective-c -fobjc-arc -fblocks -O2 -Wall \
             -arch arm64 -miphoneos-version-min=14.0 -isysroot "$SDK" \
             -dynamiclib -install_name '@rpath/KwaiInterfaceBridge.dylib' \
-            -framework Foundation -framework UIKit -framework Photos \
+            -framework Foundation -framework UIKit -framework Photos -framework CoreGraphics \
             ios/KwaiColdRainBridge/KwaiInterfaceBridge.m \
             -o dist/KwaiInterfaceBridge.dylib
           file dist/KwaiInterfaceBridge.dylib
