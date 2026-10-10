@@ -7,6 +7,9 @@ on:
     paths:
       - 'ios/KwaiColdRainBridge/**'
       - '.github/workflows/kwai-coldrain.yml'
+permissions:
+  contents: read
+  actions: read
 jobs:
   build:
     runs-on: macos-15
@@ -30,3 +33,22 @@ jobs:
         with:
           name: KwaiInterfaceBridge-arm64
           path: dist/*
+
+      - name: Publish dylib to download center
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --retry 3 --retry-delay 2 \
+            -X POST "https://ipa.78175132.xyz/api/v1/dylibs" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "x-github-repository: ${GH_REPO}" \
+            -H "x-github-run-id: ${GH_RUN_ID}" \
+            -H "x-github-sha: ${GH_SHA}" \
+            -H "Content-Type: application/octet-stream" \
+            -H "x-dylib-name: KwaiColdRain-InterfaceBridge-v1.dylib" \
+            --data-binary @dist/KwaiInterfaceBridge.dylib
